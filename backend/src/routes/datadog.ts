@@ -14,6 +14,7 @@ function ddFetch(path: string, method = "GET", body?: unknown): Promise<unknown>
       hostname: `api.${DD_SITE}`,
       path,
       method,
+      rejectUnauthorized: false,
       headers: {
         "DD-API-KEY": DD_API_KEY,
         "DD-APPLICATION-KEY": DD_APP_KEY,

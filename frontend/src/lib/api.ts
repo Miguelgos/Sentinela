@@ -114,6 +114,9 @@ export const eventsApi = {
 
   datadogOverview: () =>
     api.get<DatadogOverview>("/datadog/overview").then((r) => r.data),
+
+  gocacheOverview: () =>
+    api.get<GoCacheOverview>("/gocache/overview").then((r) => r.data),
 };
 
 export const syncApi = {
@@ -222,6 +225,25 @@ export const autoSyncApi = {
   status: () =>
     api.get<AutoSyncStatus>("/autosync/status").then((r) => r.data),
 };
+
+export interface GoCacheEvent {
+  id: string; host: string; domain: string; ip: string; method: string;
+  uri: string; user_agent: string; timestamp: number; action: string;
+  type: string; country_code: string; referer: string;
+  alerts: { id: string; msg: string; match?: string }[];
+}
+
+export interface GoCacheOverview {
+  domains: string[];
+  summary: { wafBlocked: number; firewallBlocked: number; botBlocked: number; botSimulate: number };
+  topIPs:     { ip: string; count: number }[];
+  topAlerts:  { id: string; count: number }[];
+  topURIs:    { uri: string; count: number }[];
+  topHosts:   { host: string; count: number }[];
+  recentWaf:      GoCacheEvent[];
+  recentFirewall: GoCacheEvent[];
+  recentBot:      GoCacheEvent[];
+}
 
 export interface DatadogOverview {
   monitors: {

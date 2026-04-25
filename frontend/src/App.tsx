@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LayoutDashboard, List, AlertTriangle, Settings, ShieldAlert, ShieldCheck, Globe, BarChart2 } from "lucide-react";
+import { LayoutDashboard, List, AlertTriangle, Settings, ShieldAlert, ShieldCheck, Globe, BarChart2, Flame } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { Dashboard } from "@/components/Dashboard";
@@ -10,9 +10,10 @@ import { SecurityAnalysis } from "@/components/SecurityAnalysis";
 import { KongAuthAnalysis } from "@/components/KongAuthAnalysis";
 import { SyncConfig } from "@/components/SyncConfig";
 import { DatadogAnalysis } from "@/components/DatadogAnalysis";
+import { GoCacheAnalysis } from "@/components/GoCacheAnalysis";
 import { SentinelaIcon } from "@/components/SentinelaLogo";
 
-type Page = "dashboard" | "logs" | "analysis" | "auth-errors" | "security" | "kong-auth" | "datadog" | "sync";
+type Page = "dashboard" | "logs" | "analysis" | "auth-errors" | "security" | "kong-auth" | "datadog" | "gocache" | "sync";
 
 const NAV = [
   { id: "dashboard" as Page, label: "Dashboard", icon: LayoutDashboard },
@@ -22,6 +23,7 @@ const NAV = [
   { id: "kong-auth" as Page, label: "Kong Auth", icon: Globe },
   { id: "security" as Page, label: "Segurança", icon: ShieldCheck },
   { id: "datadog" as Page, label: "Datadog", icon: BarChart2 },
+  { id: "gocache" as Page, label: "GoCache WAF", icon: Flame },
   { id: "sync" as Page, label: "Configurar Sync", icon: Settings },
 ];
 
@@ -39,6 +41,7 @@ export default function App() {
     "kong-auth": "Análise — Kong Auth Request",
     security: "Análise de Segurança",
     datadog: "Datadog — Infraestrutura & Monitores",
+    gocache: "GoCache WAF — Proteção & Ataques",
     sync: "Configurar Sincronização",
   };
 
@@ -90,6 +93,7 @@ export default function App() {
           {page === "kong-auth" && <KongAuthAnalysis key={`kong-${refreshKey}`} />}
           {page === "security" && <SecurityAnalysis key={`sec-${refreshKey}`} />}
           {page === "datadog" && <DatadogAnalysis key={`dd-${refreshKey}`} />}
+          {page === "gocache" && <GoCacheAnalysis key={`gc-${refreshKey}`} />}
           {page === "sync" && <SyncConfig onSynced={refresh} />}
         </div>
       </main>

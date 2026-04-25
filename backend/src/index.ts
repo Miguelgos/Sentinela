@@ -6,6 +6,7 @@ import syncRouter from "./routes/sync";
 import pessoaRouter from "./routes/pessoa";
 import autosyncRouter from "./routes/autosync";
 import datadogRouter from "./routes/datadog";
+import gocacheRouter from "./routes/gocache";
 import { startAutoSync } from "./autosync";
 
 dotenv.config();
@@ -21,6 +22,7 @@ app.use("/api/sync", syncRouter);
 app.use("/api/pessoa", pessoaRouter);
 app.use("/api/autosync", autosyncRouter);
 app.use("/api/datadog", datadogRouter);
+app.use("/api/gocache", gocacheRouter);
 
 app.get("/api/health", (_req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
