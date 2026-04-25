@@ -1,0 +1,42 @@
+version: "3.9"
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: seq-analyzer-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: seq_user
+      POSTGRES_PASSWORD: seq_pass
+      POSTGRES_DB: seq_logs
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/src/db/schema.sql:/docker-entrypoint-initdb.d/01-schema.sql
+    networks:
+      - seq-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U seq_user -d seq_logs"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  adminer:
+    image: adminer:latest
+    container_name: seq-analyzer-adminer
+    restart: unless-stopped
+    ports:
+      - "8080:8080"
+    networks:
+      - seq-net
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+networks:
+  seq-net:
+    driver: bridge
+
+volumes:
+  postgres_data:
