@@ -2,7 +2,7 @@
 
 ## 1. Visão Geral
 
-O **Sentinela** é um dashboard web interno de inteligência de logs para o serviço `salesbo` (Sales Backoffice) da Ituran, hospedado no Seq em `https://seq-prd.ituran.sp`. O objetivo é dar visibilidade sobre padrões de erro recorrentes, correlacionar eventos com usuários reais, detectar anomalias de segurança e facilitar investigações de incidentes.
+O **Sentinela** é um dashboard web interno de inteligência de logs e segurança para o serviço `salesbo` (Sales Backoffice) da Ituran, hospedado no Seq em `https://seq-prd.ituran.sp`. O objetivo é dar visibilidade sobre padrões de erro recorrentes, correlacionar eventos com usuários reais, detectar anomalias de segurança, monitorar infraestrutura via Datadog e acompanhar proteção de perímetro via GoCache WAF.
 
 ## 2. Problemas Mapeados
 
@@ -50,6 +50,26 @@ Padrões identificados nos logs com severidade classificada (Critical / High / M
 | SEC-006 | Medium | Usuários com 100% de chamadas com GUID vazio |
 | SEC-016 | Medium | IPs de veículos (PocSag) expostos nos logs |
 | SEC-017 | Medium | Queries lentas (> 500ms) |
+
+### 2.5 Datadog — Infraestrutura
+
+Monitoramento da infraestrutura Windows (IIS + SQL Server) e do estado de monitores Datadog:
+
+- Estado dos monitores (Alert / Warn / OK / No Data)
+- Volume de logs por serviço (últimas 4h)
+- Hosts ativos e suas aplicações
+- Métricas IIS: conexões ativas, requisições GET/POST por site, bytes transferidos, erros 404
+- Métricas SQL Server: conexões bloqueadas, full table scans/s
+
+### 2.6 GoCache WAF — Proteção de Perímetro
+
+Monitoramento dos eventos de segurança de borda nas últimas 24h:
+
+- Eventos WAF bloqueados (SQL Injection, XSS, injeção)
+- IPs bloqueados por firewall (blacklist)
+- Bots detectados e bloqueados
+- Bots em modo monitor (simulação)
+- Top IPs atacantes, tipos de ataque, URIs e hosts mais visados
 
 ## 3. Requisitos Funcionais
 
@@ -142,8 +162,9 @@ Padrões identificados nos logs com severidade classificada (Critical / High / M
 ### RF-11: Exportação PDF
 
 - Todas as páginas de análise têm botão "Exportar PDF"
-- PDF inclui: cabeçalho azul com título/subtítulo/data de geração, rodapé com paginação, tabelas e seções
+- PDF inclui: cabeçalho azul com logo Sentinela + título/subtítulo/data de geração, rodapé com paginação, tabelas e seções
 - Fonte Helvetica (CP1252) — sem emoji ou símbolos Unicode acima de U+00FF nos títulos
+- Logo desenhado com primitivas jsPDF (shield + eye) — sem dependência de arquivo externo
 - Arquivo salvo com nome `{pagina}-{yyyy-MM-dd_HH-mm}.pdf`
 
 ### RF-12: Lookup de pessoa
@@ -151,6 +172,29 @@ Padrões identificados nos logs com severidade classificada (Critical / High / M
 - Dado um `user_id` (numérico = `cd_pessoa`), retornar `nm_pessoa` do banco `ituranweb` via SQL Server
 - Suportar lookup em batch (múltiplos IDs de uma vez)
 - Estatísticas por pessoa: total de eventos, erros, eventos com GUID vazio
+
+### RF-13: Datadog — Infraestrutura & Monitores
+
+- Conectar à API Datadog (`api.us5.datadoghq.com`) via `DD-API-KEY` + `DD-APPLICATION-KEY`
+- **Monitores**: contagem por estado (Alert/Warn/OK/No Data), lista dos em alerta/warn, alertas de licença
+- **Logs**: volume por serviço (error/warn/info) nas últimas 4h via `/api/v2/logs/events`
+- **Hosts**: lista de hosts ativos com aplicações via `/api/v1/hosts`
+- **Métricas IIS** (última hora via `/api/v1/query`):
+  - Conexões ativas por host
+  - Requisições GET + POST por site
+  - Bytes transferidos por host
+  - Erros 404 por host
+- **Métricas SQL Server** (última hora):
+  - Conexões bloqueadas por host
+  - Full table scans/s por host
+
+### RF-14: GoCache WAF — Proteção de Perímetro
+
+- Conectar à API GoCache via header `GoCache-Token: <token>`
+- **Resumo 24h**: total WAF bloqueados, firewall bloqueados, bots bloqueados, bots em modo monitor
+- **Análise**: top IPs atacantes, top tipos de ataque WAF, top URIs atacadas, top hosts visados
+- **Eventos recentes**: tabelas dos últimos eventos WAF, firewall e bot (máx. 100 cada por limitação da API)
+- Banner de contexto com domínios protegidos e totais do dia
 
 ## 4. Requisitos Não Funcionais
 
@@ -161,8 +205,10 @@ Padrões identificados nos logs com severidade classificada (Critical / High / M
 | Latência do dashboard | < 2s com índice trigram e janela de 4h |
 | Volume esperado | Até ~500 eventos/hora por signal |
 | SSL | Certificado autoassinado no Seq — verificação desabilitada |
+| TLS externo (Datadog/GoCache) | `rejectUnauthorized: false` no WSL (WSL não resolve a cadeia de CA) |
 | Autenticação no Seq | Desabilitada — endpoint público sem credenciais |
 | PostgreSQL | `max_parallel_workers_per_gather = 0` para evitar esgotamento de memória compartilhada |
+| GoCache API limit | Máximo 100 eventos por requisição |
 
 ## 5. Modelo de Dados
 
@@ -258,4 +304,46 @@ Propriedades extraídas: `StatusCode` (int), `Username` (text), `ClientIp` (text
 | Falhas de Autenticação | `auth-errors` | `AuthErrorAnalysis.tsx` | `exportAuthErrorPdf` |
 | Kong Auth | `kong-auth` | `KongAuthAnalysis.tsx` | `exportKongAuthPdf` |
 | Segurança | `security` | `SecurityAnalysis.tsx` | `exportSecurityPdf` |
+| Datadog | `datadog` | `DatadogAnalysis.tsx` | — |
+| GoCache WAF | `gocache` | `GoCacheAnalysis.tsx` | — |
 | Configurar Sync | `sync` | `SyncConfig.tsx` | — |
+
+## 9. Integrações Externas
+
+### 9.1 Datadog (`api.us5.datadoghq.com`)
+
+Autenticação via `DD-API-KEY` + `DD-APPLICATION-KEY`. Endpoints consumidos:
+
+| Endpoint Datadog | Uso |
+|-----------------|-----|
+| `GET /api/v1/monitor` | Estado de todos os monitores |
+| `GET /api/v2/logs/events` | Logs das últimas 4h (volume por serviço) |
+| `GET /api/v1/hosts` | Lista de hosts ativos |
+| `GET /api/v1/query` | Métricas IIS e SQL Server (série temporal, última hora) |
+
+Métricas consultadas via `/api/v1/query`:
+
+| Métrica | Agrupamento | Significado |
+|---------|------------|-------------|
+| `sum:iis.net.num_connections{*}` | `by{host}` | Conexões HTTP ativas |
+| `sum:iis.httpd_request_method.get{*}` | `by{site}` | Requisições GET/s por site IIS |
+| `sum:iis.httpd_request_method.post{*}` | `by{site}` | Requisições POST/s por site IIS |
+| `sum:iis.net.bytes_total{*}` | `by{host}` | Throughput (bytes/s) por host |
+| `sum:iis.errors.not_found{*}` | `by{host}` | Taxa de erros 404/s |
+| `avg:sqlserver.activity.blocked_connections{*}` | `by{host}` | Conexões SQL bloqueadas |
+| `avg:sqlserver.access.full_scans{*}` | `by{host}` | Full table scans/s |
+
+> Nota: métricas `system.cpu.*` e `system.mem.*` não estão disponíveis neste ambiente — o agente Datadog monitora IIS/SQL Server Windows, não métricas de host genéricas.
+
+### 9.2 GoCache WAF
+
+Autenticação via header `GoCache-Token: <token>`. Consultas paralelas às últimas 24h:
+
+| Tipo | Action | Significado |
+|------|--------|-------------|
+| `waf` | `block` | Ataques bloqueados pelo WAF (SQLi, XSS, etc.) |
+| `firewall` | `block` | IPs bloqueados por blacklist |
+| `bot-mitigation` | `block` | Bots detectados e bloqueados |
+| `bot-mitigation` | `simulate` | Bots detectados em modo monitor |
+
+Limite da API GoCache: 100 eventos por requisição. O campo `size` da resposta indica o total real de eventos no período.
