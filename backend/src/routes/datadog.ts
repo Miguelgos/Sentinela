@@ -132,4 +132,64 @@ router.get("/overview", async (_req, res) => {
   }
 });
 
+// GET /api/datadog/metrics — IIS + SQL Server metrics (last hour)
+router.get("/metrics", async (_req, res) => {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const from = now - 3600;
+
+    const q = (query: string) =>
+      ddFetch(`/api/v1/query?from=${from}&to=${now}&query=${encodeURIComponent(query)}`);
+
+    const [connRaw, getReqRaw, postReqRaw, bytesRaw, errorsRaw, blockedRaw, fullScansRaw] =
+      await Promise.all([
+        q("sum:iis.net.num_connections{*}by{host}"),
+        q("sum:iis.httpd_request_method.get{*}by{site}"),
+        q("sum:iis.httpd_request_method.post{*}by{site}"),
+        q("sum:iis.net.bytes_total{*}by{host}"),
+        q("sum:iis.errors.not_found{*}by{host}"),
+        q("avg:sqlserver.activity.blocked_connections{*}by{host}"),
+        q("avg:sqlserver.access.full_scans{*}by{host}"),
+      ]);
+
+    function extract(raw: unknown) {
+      const series = ((raw as Record<string, unknown>)?.series ?? []) as Record<string, unknown>[];
+      return series.map((s) => {
+        const pts = (s.pointlist ?? []) as [number, number | null][];
+        const last = [...pts].reverse().find((p) => p[1] !== null);
+        return { scope: String(s.scope ?? ""), value: last ? Math.round(last[1]! * 100) / 100 : 0 };
+      }).sort((a, b) => b.value - a.value);
+    }
+
+    const iisConnections = extract(connRaw).map((s) => ({
+      host: s.scope.replace("host:", ""),
+      connections: s.value,
+    }));
+
+    const getMap: Record<string, number> = {};
+    const postMap: Record<string, number> = {};
+    for (const s of extract(getReqRaw))  getMap[s.scope.replace("site:", "")]  = s.value;
+    for (const s of extract(postReqRaw)) postMap[s.scope.replace("site:", "")] = s.value;
+    const allSites = new Set([...Object.keys(getMap), ...Object.keys(postMap)]);
+    const iisBySite = [...allSites]
+      .map((site) => ({ site, get: getMap[site] ?? 0, post: postMap[site] ?? 0, total: (getMap[site] ?? 0) + (postMap[site] ?? 0) }))
+      .sort((a, b) => b.total - a.total)
+      .slice(0, 15);
+
+    const iisBytes  = extract(bytesRaw).map((s) => ({ host: s.scope.replace("host:", ""), bytes: s.value }));
+    const iisErrors = extract(errorsRaw).map((s) => ({ host: s.scope.replace("host:", ""), notFound: s.value }));
+
+    const sqlBlocked   = extract(blockedRaw).map((s)   => ({ host: s.scope.replace("host:", ""), blocked: s.value }));
+    const sqlFullScans = extract(fullScansRaw).map((s) => ({ host: s.scope.replace("host:", ""), fullScans: s.value }));
+
+    res.json({
+      iis: { connections: iisConnections, bySite: iisBySite, bytes: iisBytes, errors: iisErrors },
+      sql: { blocked: sqlBlocked, fullScans: sqlFullScans },
+    });
+  } catch (err) {
+    console.error("[datadog] metrics error:", err);
+    res.status(502).json({ error: String(err) });
+  }
+});
+
 export default router;

@@ -4,12 +4,12 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
   Activity, AlertTriangle, CheckCircle, Server, Monitor,
-  XCircle, HelpCircle,
+  XCircle, HelpCircle, Database, Globe2,
 } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
 } from "recharts";
-import { eventsApi, type DatadogOverview } from "@/lib/api";
+import { eventsApi, type DatadogOverview, type DatadogMetrics } from "@/lib/api";
 
 function StateBadge({ state }: { state: string }) {
   const map: Record<string, string> = {
@@ -34,7 +34,9 @@ function StateIcon({ state }: { state: string }) {
 
 export function DatadogAnalysis() {
   const [data, setData] = useState<DatadogOverview | null>(null);
+  const [metrics, setMetrics] = useState<DatadogMetrics | null>(null);
   const [loading, setLoading] = useState(true);
+  const [metricsLoading, setMetricsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -42,6 +44,10 @@ export function DatadogAnalysis() {
       .then(setData)
       .catch((e) => setError(String(e)))
       .finally(() => setLoading(false));
+    eventsApi.datadogMetrics()
+      .then(setMetrics)
+      .catch(() => null)
+      .finally(() => setMetricsLoading(false));
   }, []);
 
   if (loading) {
@@ -297,6 +303,172 @@ export function DatadogAnalysis() {
           </div>
         </CardContent>
       </Card>
+
+      {/* IIS + SQL Metrics */}
+      {metricsLoading ? (
+        <Card><CardContent className="p-4"><Skeleton className="h-32 w-full" /></CardContent></Card>
+      ) : metrics ? (
+        <>
+          {/* IIS section header */}
+          <div className="flex items-center gap-2 pt-2">
+            <Globe2 className="h-4 w-4 text-cyan-400" />
+            <h2 className="text-sm font-semibold text-cyan-300">IIS — Métricas da Última Hora</h2>
+          </div>
+
+          {/* IIS summary cards */}
+          <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-xs text-muted-foreground">Conexões ativas</p>
+                <p className="text-2xl font-bold text-cyan-300">
+                  {metrics.iis.connections.reduce((s, h) => s + h.connections, 0).toLocaleString("pt-BR")}
+                </p>
+                <p className="text-xs text-muted-foreground">{metrics.iis.connections.length} hosts</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-xs text-muted-foreground">Req/s (GET+POST)</p>
+                <p className="text-2xl font-bold text-blue-300">
+                  {metrics.iis.bySite.reduce((s, x) => s + x.total, 0).toLocaleString("pt-BR", { maximumFractionDigits: 0 })}
+                </p>
+                <p className="text-xs text-muted-foreground">{metrics.iis.bySite.length} sites</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-xs text-muted-foreground">Bytes transferidos/s</p>
+                <p className="text-2xl font-bold text-purple-300">
+                  {(metrics.iis.bytes.reduce((s, h) => s + h.bytes, 0) / 1024).toLocaleString("pt-BR", { maximumFractionDigits: 0 })} KB
+                </p>
+                <p className="text-xs text-muted-foreground">total dos hosts</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardContent className="p-4">
+                <p className="text-xs text-muted-foreground">Erros 404/s</p>
+                <p className="text-2xl font-bold text-red-300">
+                  {metrics.iis.errors.reduce((s, h) => s + h.notFound, 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 })}
+                </p>
+                <p className="text-xs text-muted-foreground">not found rate</p>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* IIS connections per host + requests per site */}
+          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Server className="h-4 w-4 text-cyan-400" />
+                  Conexões por Host
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={180}>
+                  <BarChart data={metrics.iis.connections} layout="vertical">
+                    <XAxis type="number" tick={{ fontSize: 9 }} />
+                    <YAxis type="category" dataKey="host" tick={{ fontSize: 9 }} width={130} />
+                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }} />
+                    <Bar dataKey="connections" fill="#06b6d4" name="Conexões" radius={[0, 3, 3, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm font-medium flex items-center gap-2">
+                  <Activity className="h-4 w-4 text-blue-400" />
+                  Requisições por Site (req/s)
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                <ResponsiveContainer width="100%" height={180}>
+                  <BarChart data={metrics.iis.bySite.slice(0, 10)} layout="vertical">
+                    <XAxis type="number" tick={{ fontSize: 9 }} />
+                    <YAxis type="category" dataKey="site" tick={{ fontSize: 8 }} width={130} />
+                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }} />
+                    <Bar dataKey="get"  stackId="a" fill="#3b82f6" name="GET" />
+                    <Bar dataKey="post" stackId="a" fill="#8b5cf6" name="POST" radius={[0, 3, 3, 0]} />
+                  </BarChart>
+                </ResponsiveContainer>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* SQL Server section */}
+          {(metrics.sql.blocked.length > 0 || metrics.sql.fullScans.length > 0) && (
+            <>
+              <div className="flex items-center gap-2 pt-2">
+                <Database className="h-4 w-4 text-orange-400" />
+                <h2 className="text-sm font-semibold text-orange-300">SQL Server — Última Hora</h2>
+              </div>
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                      <AlertTriangle className="h-4 w-4 text-orange-400" />
+                      Conexões Bloqueadas
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b bg-muted/50">
+                          <th className="text-left p-2 text-muted-foreground">Host</th>
+                          <th className="text-right p-2 text-muted-foreground">Bloqueadas</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {metrics.sql.blocked.map((r) => (
+                          <tr key={r.host} className="border-b hover:bg-muted/20">
+                            <td className="p-2 font-mono">{r.host}</td>
+                            <td className="p-2 text-right">
+                              <Badge variant={r.blocked > 0 ? "error" : "secondary"}>{r.blocked}</Badge>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm font-medium flex items-center gap-2">
+                      <Database className="h-4 w-4 text-amber-400" />
+                      Full Table Scans / s
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="border-b bg-muted/50">
+                          <th className="text-left p-2 text-muted-foreground">Host</th>
+                          <th className="text-right p-2 text-muted-foreground">Scans/s</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {metrics.sql.fullScans.map((r) => (
+                          <tr key={r.host} className="border-b hover:bg-muted/20">
+                            <td className="p-2 font-mono">{r.host}</td>
+                            <td className="p-2 text-right">
+                              <span className={r.fullScans > 100 ? "text-amber-300 font-bold" : "text-muted-foreground"}>
+                                {r.fullScans.toLocaleString("pt-BR")}
+                              </span>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </CardContent>
+                </Card>
+              </div>
+            </>
+          )}
+        </>
+      ) : null}
     </div>
   );
 }

@@ -117,6 +117,9 @@ export const eventsApi = {
 
   gocacheOverview: () =>
     api.get<GoCacheOverview>("/gocache/overview").then((r) => r.data),
+
+  datadogMetrics: () =>
+    api.get<DatadogMetrics>("/datadog/metrics").then((r) => r.data),
 };
 
 export const syncApi = {
@@ -243,6 +246,19 @@ export interface GoCacheOverview {
   recentWaf:      GoCacheEvent[];
   recentFirewall: GoCacheEvent[];
   recentBot:      GoCacheEvent[];
+}
+
+export interface DatadogMetrics {
+  iis: {
+    connections: { host: string; connections: number }[];
+    bySite:      { site: string; get: number; post: number; total: number }[];
+    bytes:       { host: string; bytes: number }[];
+    errors:      { host: string; notFound: number }[];
+  };
+  sql: {
+    blocked:    { host: string; blocked: number }[];
+    fullScans:  { host: string; fullScans: number }[];
+  };
 }
 
 export interface DatadogOverview {
