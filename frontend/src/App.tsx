@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LayoutDashboard, List, AlertTriangle, Settings, ShieldAlert, ShieldCheck, Globe } from "lucide-react";
+import { LayoutDashboard, List, AlertTriangle, Settings, ShieldAlert, ShieldCheck, Globe, BarChart2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { Dashboard } from "@/components/Dashboard";
@@ -9,9 +9,10 @@ import { AuthErrorAnalysis } from "@/components/AuthErrorAnalysis";
 import { SecurityAnalysis } from "@/components/SecurityAnalysis";
 import { KongAuthAnalysis } from "@/components/KongAuthAnalysis";
 import { SyncConfig } from "@/components/SyncConfig";
+import { DatadogAnalysis } from "@/components/DatadogAnalysis";
 import { SentinelaIcon } from "@/components/SentinelaLogo";
 
-type Page = "dashboard" | "logs" | "analysis" | "auth-errors" | "security" | "kong-auth" | "sync";
+type Page = "dashboard" | "logs" | "analysis" | "auth-errors" | "security" | "kong-auth" | "datadog" | "sync";
 
 const NAV = [
   { id: "dashboard" as Page, label: "Dashboard", icon: LayoutDashboard },
@@ -20,6 +21,7 @@ const NAV = [
   { id: "auth-errors" as Page, label: "Falhas de Autenticação", icon: ShieldAlert },
   { id: "kong-auth" as Page, label: "Kong Auth", icon: Globe },
   { id: "security" as Page, label: "Segurança", icon: ShieldCheck },
+  { id: "datadog" as Page, label: "Datadog", icon: BarChart2 },
   { id: "sync" as Page, label: "Configurar Sync", icon: Settings },
 ];
 
@@ -36,6 +38,7 @@ export default function App() {
     "auth-errors": "Análise — Falhas de Autenticação",
     "kong-auth": "Análise — Kong Auth Request",
     security: "Análise de Segurança",
+    datadog: "Datadog — Infraestrutura & Monitores",
     sync: "Configurar Sincronização",
   };
 
@@ -86,6 +89,7 @@ export default function App() {
           {page === "auth-errors" && <AuthErrorAnalysis key={`auth-${refreshKey}`} />}
           {page === "kong-auth" && <KongAuthAnalysis key={`kong-${refreshKey}`} />}
           {page === "security" && <SecurityAnalysis key={`sec-${refreshKey}`} />}
+          {page === "datadog" && <DatadogAnalysis key={`dd-${refreshKey}`} />}
           {page === "sync" && <SyncConfig onSynced={refresh} />}
         </div>
       </main>

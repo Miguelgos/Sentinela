@@ -111,6 +111,9 @@ export const eventsApi = {
 
   kongAuthStats: () =>
     api.get<KongAuthStats>("/events/stats/kong-auth").then((r) => r.data),
+
+  datadogOverview: () =>
+    api.get<DatadogOverview>("/datadog/overview").then((r) => r.data),
 };
 
 export const syncApi = {
@@ -219,6 +222,24 @@ export const autoSyncApi = {
   status: () =>
     api.get<AutoSyncStatus>("/autosync/status").then((r) => r.data),
 };
+
+export interface DatadogOverview {
+  monitors: {
+    total: number;
+    stateCounts: Record<string, number>;
+    alerting: { id: number; name: string; state: string; type: string; query: string }[];
+    licenseAlerts: { name: string; state: string }[];
+  };
+  logs: {
+    total: number;
+    byStatus: Record<string, number>;
+    byService: { service: string; total: number; error: number; warn: number; info: number }[];
+  };
+  hosts: {
+    total: number;
+    list: { name: string; apps: string[]; lastReported: number }[];
+  };
+}
 
 export const pessoaApi = {
   lookup: (userIds: string[]): Promise<Record<string, string>> =>
