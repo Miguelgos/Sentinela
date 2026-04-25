@@ -29,10 +29,76 @@ function stamp() {
   return format(new Date(), "yyyy-MM-dd_HH-mm");
 }
 
+function drawLogo(doc: jsPDF, cx: number, cy: number) {
+  const hw = 6.5;
+
+  // Shield filled polygon
+  doc.setFillColor(BRAND);
+  doc.setDrawColor(BRAND);
+  doc.setLineWidth(0);
+  doc.lines(
+    [[hw, 1.4], [0, 7.7], [-2.5, 5.5], [-4, 3.0], [-4, -3.0], [-2.5, -5.5], [0, -7.7]],
+    cx, cy - 8.6,
+    [1, 1], "F", true,
+  );
+
+  // Shield inner border highlight
+  doc.setDrawColor("#93c5fd");
+  doc.setLineWidth(0.25);
+  doc.lines(
+    [[5.2, 1.1], [0, 6.4], [-2.1, 4.7], [-3.1, 2.5], [-3.1, -2.5], [-2.1, -4.7], [0, -6.4]],
+    cx, cy - 7.2,
+    [1, 1], "S", true,
+  );
+
+  // Top eyelash arc
+  doc.setLineWidth(0.28);
+  doc.setDrawColor("#93c5fd");
+  (doc as unknown as { lines: (lines: number[][], x: number, y: number, scale: [number,number], style: string) => void })
+    .lines([[2.1, -3.2, 6.3, -3.2, 8.4, 0]], cx - 4.2, cy - 0.6, [1, 1], "S");
+
+  // Bottom eyelash arc
+  (doc as unknown as { lines: (lines: number[][], x: number, y: number, scale: [number,number], style: string) => void })
+    .lines([[2.1, 3.2, 6.3, 3.2, 8.4, 0]], cx - 4.2, cy + 0.6, [1, 1], "S");
+
+  // Outer eye ellipse
+  doc.setDrawColor("#bfdbfe");
+  doc.setLineWidth(0.4);
+  doc.ellipse(cx, cy, 4.2, 2.5, "S");
+
+  // Iris
+  doc.setFillColor("#1e3a8a");
+  doc.circle(cx, cy, 1.7, "F");
+
+  // Pupil
+  doc.setFillColor("#0f172a");
+  doc.circle(cx, cy, 0.95, "F");
+
+  // Glint
+  doc.setFillColor("#93c5fd");
+  doc.circle(cx + 0.65, cy - 0.65, 0.42, "F");
+
+  // Scan line (dashed)
+  const d = doc as unknown as { setLineDashPattern: (a: number[], p: number) => void };
+  doc.setDrawColor("#60a5fa");
+  doc.setLineWidth(0.2);
+  d.setLineDashPattern([0.7, 1.4], 0);
+  doc.line(cx - hw, cy, cx + hw, cy);
+  d.setLineDashPattern([], 0);
+
+  // Reset stroke
+  doc.setLineWidth(0.2);
+  doc.setDrawColor("#000000");
+}
+
 function header(doc: jsPDF, title: string, subtitle = "Ituran · integra-prd · salesbo") {
   const n = now();
   doc.setFillColor(BRAND);
   doc.rect(0, 0, 210, 28, "F");
+
+  // Logo icon (top-right of header bar)
+  drawLogo(doc, 196, 14);
+
   doc.setFontSize(16);
   doc.setTextColor("#ffffff");
   doc.setFont("helvetica", "bold");
@@ -52,7 +118,7 @@ function footers(doc: jsPDF, label: string, n: string) {
     doc.setFontSize(7);
     doc.setTextColor(GRAY);
     doc.setFont("helvetica", "normal");
-    doc.text(`Ituran · Seq Analyzer · ${label} · ${n}`, 14, 291);
+    doc.text(`Ituran · Sentinela · ${label} · ${n}`, 14, 291);
     doc.text(`Página ${i} / ${pageCount}`, 196, 291, { align: "right" });
   }
 }
