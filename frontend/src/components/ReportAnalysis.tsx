@@ -128,7 +128,7 @@ export function ReportAnalysis() {
         <div className="text-center space-y-1">
           <h2 className="text-lg font-semibold">Relatório de Ameaças Cibernéticas</h2>
           <p className="text-sm text-muted-foreground max-w-sm">
-            Correlaciona dados de Seq, Datadog e GoCache WAF com análise narrativa gerada pelo Gemini AI.
+            Correlaciona dados de Seq, Datadog e GoCache WAF com análise narrativa gerada pelo Claude (Anthropic).
           </p>
         </div>
         <Button onClick={generate} size="lg">
@@ -144,7 +144,7 @@ export function ReportAnalysis() {
       <div className="space-y-6">
         <div className="flex items-center gap-3">
           <RefreshCw className="h-4 w-4 animate-spin text-muted-foreground" />
-          <span className="text-sm text-muted-foreground">Coletando dados e gerando análise com Gemini…</span>
+          <span className="text-sm text-muted-foreground">Coletando dados e gerando análise com Claude…</span>
         </div>
         <div className="grid grid-cols-3 gap-3">
           {[...Array(3)].map((_, i) => <Skeleton key={i} className="h-16 rounded-md" />)}
@@ -248,7 +248,7 @@ export function ReportAnalysis() {
 
       <Separator />
 
-      {/* Gemini narrative */}
+      {/* Claude narrative */}
       <div>
         <div className="flex items-center gap-2 mb-3">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
