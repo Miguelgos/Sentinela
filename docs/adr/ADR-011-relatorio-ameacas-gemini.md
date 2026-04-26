@@ -1,4 +1,4 @@
-# ADR-011 — Relatório de Ameaças com Correlação de Regras + Gemini AI
+# ADR-011 — Relatório de Ameaças com Correlação de Regras + Claude AI (Anthropic)
 
 ## Status
 
@@ -25,8 +25,9 @@ Cada fonte de dados (Seq, Datadog, GoCache) fornece visões isoladas de eventos 
   10. BOT_ATTACK — mais de 100 bloqueios de mitigação de bots em 24 horas
   11. INFRA_STRESS — hosts com CPU acima de 85%, disco acima de 90% ou reinicializações de pods
   12. GEO_CONCENTRATION — volume de ataque concentrado em códigos de país de alto risco (CN, RU, KP, IR)
-- Após a avaliação das regras, um prompt estruturado (limite de aproximadamente 400 palavras) é enviado ao **Gemini 2.0 Flash** (`gemini-2.0-flash`) via `lib/geminiClient.ts`. O prompt inclui contexto quantitativo e as regras disparadas, solicitando uma narrativa executiva em 4 seções em português.
-- Se o Gemini estiver indisponível, um resumo estático de fallback é retornado.
+- Após a avaliação das regras, um prompt estruturado (limite de aproximadamente 400 palavras) é enviado ao **Claude Haiku 4.5** (`claude-haiku-4-5-20251001`) via `lib/geminiClient.ts` (nome mantido por compatibilidade interna). O prompt inclui contexto quantitativo e as regras disparadas, solicitando uma narrativa executiva em 4 seções em português (Resumo Executivo, Ameaças Prioritárias, Recomendações Imediatas, Avaliação de Risco).
+- Autenticação via header `x-api-key` + `anthropic-version: 2023-06-01`. Endpoint: `POST https://api.anthropic.com/v1/messages`.
+- Se a API estiver indisponível, um resumo estático de fallback é retornado. O cliente detecta bloqueios de proxy (HTTP 302/301 ou body vazio) e expõe `narrativeError` na resposta para exibição no frontend.
 - O componente frontend `ReportAnalysis.tsx` gera o relatório sob demanda (clique em botão), exibe os achados com badges de risco coloridos e oferece exportação em PDF via `exportThreatReportPdf`.
 
 ## Consequências
@@ -34,6 +35,7 @@ Cada fonte de dados (Seq, Datadog, GoCache) fornece visões isoladas de eventos 
 - (+) Uma única chamada de API fornece um panorama de ameaças correlacionado entre as três fontes.
 - (+) A narrativa gerada por IA reduz o tempo de compreensão para stakeholders não técnicos.
 - (+) `Promise.allSettled` garante resultados parciais quando uma fonte está indisponível.
-- (-) A API do Gemini requer acesso externo à internet e gerenciamento de chave de API.
+- (+) `api.anthropic.com` está acessível na rede corporativa Ituran (Forcepoint não bloqueia); `generativelanguage.googleapis.com` estava bloqueado e foi descartado.
+- (-) A API requer acesso externo à internet e gerenciamento de chave de API (`ANTHROPIC_API_KEY`).
 - (-) O relatório é pontual (sem tendências históricas) — aceitável para uso operacional.
-- (-) A qualidade da resposta do Gemini depende da estrutura do prompt — prompt fixo validado contra dados reais.
+- (-) A qualidade da resposta depende da estrutura do prompt — prompt fixo validado contra dados reais.

@@ -12,7 +12,7 @@ O **Sentinela** monitora em tempo real os eventos do serviço `salesbo` (Sales B
 4. **Análise de Segurança** — findings de segurança com severidade (Critical/High/Medium/Low)
 5. **Datadog** — monitores, logs, hosts, SLOs, downtimes, incidentes, métricas IIS, SQL Server e infra
 6. **GoCache WAF** — eventos WAF, firewall, bot mitigation, categorias de ataque, países, ferramentas ofensivas
-7. **Relatório de Ameaças** — 12 regras de correlação cruzada (Seq + Datadog + GoCache) + narrativa executiva Gemini 2.0 Flash
+7. **Relatório de Ameaças** — 12 regras de correlação cruzada (Seq + Datadog + GoCache) + narrativa executiva Claude (Anthropic)
 
 ## Stack
 
@@ -27,7 +27,7 @@ O **Sentinela** monitora em tempo real os eventos do serviço `salesbo` (Sales B
 | PDF export | jsPDF + jspdf-autotable |
 | HTTP (interno) | `https` nativo do Node (TLS sem verificação de certificado) |
 | Monitoramento externo | Datadog (us5.datadoghq.com) + GoCache WAF API |
-| IA generativa | Gemini 2.0 Flash (narrativa do Relatório de Ameaças) |
+| IA generativa | Claude Haiku 4.5 — Anthropic API (narrativa do Relatório de Ameaças) |
 
 ## Estrutura
 
@@ -41,13 +41,13 @@ seq-analyzer/
 │   │   ├── lib/
 │   │   │   ├── ddClient.ts      # Datadog HTTP client
 │   │   │   ├── gcClient.ts      # GoCache HTTP client
-│   │   │   └── geminiClient.ts  # Gemini 2.0 Flash client
+│   │   │   └── geminiClient.ts  # Anthropic Claude client (nome histórico)
 │   │   ├── routes/
 │   │   │   ├── events.ts        # Seq events CRUD + stats
 │   │   │   ├── pessoa.ts        # Nome lookup
 │   │   │   ├── datadog.ts       # Datadog overview + metrics + infra
 │   │   │   ├── gocache.ts       # GoCache WAF + bot + firewall
-│   │   │   └── report.ts        # Relatório de Ameaças (12 regras + Gemini)
+│   │   │   └── report.ts        # Relatório de Ameaças (12 regras + Claude)
 │   │   ├── accumulator.ts       # Seq polling + in-memory store + SQLite write-through
 │   │   ├── seq.ts               # Seq HTTP client
 │   │   ├── types.ts             # Event parsers
@@ -119,7 +119,7 @@ MSSQL_SERVER=<server>
 MSSQL_DATABASE=ituranweb
 MSSQL_USER=<user>
 MSSQL_PASSWORD=<password>
-GEMINI_API_KEY=<gemini-key>
+ANTHROPIC_API_KEY=<anthropic-api-key>
 ```
 
 > Todas as variáveis são lidas no boot do processo — reiniciar o backend após alterar o `.env`.
@@ -164,7 +164,7 @@ GEMINI_API_KEY=<gemini-key>
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| GET | `/api/report/threat` | 12 regras de correlação cruzada + narrativa Gemini 2.0 Flash |
+| GET | `/api/report/threat` | 12 regras de correlação cruzada + narrativa Claude (Anthropic) |
 
 ### Health
 
@@ -191,7 +191,7 @@ O endpoint `/api/report/threat` cruza dados de Seq, Datadog e GoCache com 12 reg
 | `INFRA_STRESS` | CPU, memória ou disco de hosts em nível crítico |
 | `GEO_CONCENTRATION` | Concentração anômala de ataques em um único país |
 
-A narrativa executiva é gerada pelo Gemini 2.0 Flash com ~400 palavras em 4 seções estruturadas. Em caso de indisponibilidade da API, um resumo estático é retornado como fallback.
+A narrativa executiva é gerada pelo Claude Haiku 4.5 (Anthropic) com ~400 palavras em 4 seções estruturadas: Resumo Executivo, Ameaças Prioritárias, Recomendações Imediatas e Avaliação de Risco. Em caso de indisponibilidade da API, um resumo estático é retornado como fallback.
 
 ## Exportação PDF
 
@@ -236,13 +236,15 @@ Autenticação via header `GoCache-Token: <token>`. Consultas às últimas 24h c
 - Bots bloqueados e em modo monitor
 - Detecção de ferramentas ofensivas: SQLMap, Nikto, Dart, Python, curl, Go, Java, Headless
 
-### Gemini (`generativelanguage.googleapis.com`)
+### Anthropic Claude (`api.anthropic.com`)
 
-- Model: `gemini-2.0-flash`
-- Endpoint: `POST /v1beta/models/gemini-2.0-flash:generateContent`
-- Autenticação: query param `key=GEMINI_API_KEY`
+- Model: `claude-haiku-4-5-20251001`
+- Endpoint: `POST /v1/messages`
+- Autenticação: header `x-api-key: ANTHROPIC_API_KEY` + `anthropic-version: 2023-06-01`
 - Usado exclusivamente para a narrativa executiva do Relatório de Ameaças
-- Fallback automático para resumo estático se API indisponível
+- Fallback automático para resumo estático se API indisponível ou bloqueada
+
+> `generativelanguage.googleapis.com` (Gemini) está bloqueado pelo Forcepoint na rede corporativa Ituran. `api.anthropic.com` está acessível.
 
 ### SQL Server (`ituranweb`)
 

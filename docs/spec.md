@@ -2,7 +2,7 @@
 
 ## 1. Visão Geral
 
-O **Sentinela** é um dashboard web interno de inteligência de logs e segurança para o serviço `salesbo` (Sales Backoffice) da Ituran, hospedado no Seq em `https://seq-prd.ituran.sp`. O objetivo é dar visibilidade sobre padrões de erro recorrentes, correlacionar eventos com usuários reais, detectar anomalias de segurança, monitorar infraestrutura via Datadog, acompanhar proteção de perímetro via GoCache WAF e gerar relatórios executivos de ameaças com correlação cruzada e narrativa gerada por IA (Gemini 2.0 Flash).
+O **Sentinela** é um dashboard web interno de inteligência de logs e segurança para o serviço `salesbo` (Sales Backoffice) da Ituran, hospedado no Seq em `https://seq-prd.ituran.sp`. O objetivo é dar visibilidade sobre padrões de erro recorrentes, correlacionar eventos com usuários reais, detectar anomalias de segurança, monitorar infraestrutura via Datadog, acompanhar proteção de perímetro via GoCache WAF e gerar relatórios executivos de ameaças com correlação cruzada e narrativa gerada por IA (Claude Haiku 4.5 — Anthropic).
 
 ## 2. Problemas Mapeados
 
@@ -87,7 +87,7 @@ Monitoramento dos eventos de segurança de borda nas últimas 24h:
 Geração sob demanda de um relatório executivo consolidado:
 
 - **12 regras de correlação cruzada** sobre dados de Seq, Datadog e GoCache: `BRUTE_FORCE`, `ANOMALOUS_USERNAMES`, `WAF_INJECTION`, `MULTI_SOURCE_IP`, `EXPIRED_CERTS`, `DATADOG_ALERT`, `HIGH_ERROR_RATE`, `ACTIVE_INCIDENT`, `SCANNER_DETECTED`, `BOT_ATTACK`, `INFRA_STRESS`, `GEO_CONCENTRATION`
-- **Narrativa executiva** gerada pelo Gemini 2.0 Flash: ~400 palavras em 4 seções estruturadas (contexto, ameaças detectadas, recomendações, conclusão); fallback estático se API indisponível
+- **Narrativa executiva** gerada pelo Claude Haiku 4.5 (Anthropic): ~400 palavras em 4 seções estruturadas (Resumo Executivo, Ameaças Prioritárias, Recomendações Imediatas, Avaliação de Risco); fallback estático se API indisponível
 - **Exportação PDF** com logo Sentinela, seções de findings e tabelas de evidências (`exportThreatReportPdf`)
 
 ## 3. Requisitos Funcionais
@@ -240,8 +240,8 @@ Geração sob demanda de um relatório executivo consolidado:
 - Geração sob demanda via `GET /api/report/threat`
 - **12 regras de correlação cruzada** sobre dados de Seq, Datadog e GoCache: `BRUTE_FORCE`, `ANOMALOUS_USERNAMES`, `WAF_INJECTION`, `MULTI_SOURCE_IP`, `EXPIRED_CERTS`, `DATADOG_ALERT`, `HIGH_ERROR_RATE`, `ACTIVE_INCIDENT`, `SCANNER_DETECTED`, `BOT_ATTACK`, `INFRA_STRESS`, `GEO_CONCENTRATION`
 - Cada regra produz: status (triggered/clear), severidade, descrição e evidências tabuladas
-- **Narrativa executiva** gerada pelo Gemini 2.0 Flash (~400 palavras, 4 seções estruturadas): contexto, ameaças detectadas, recomendações, conclusão
-- Fallback automático para resumo estático se a API Gemini estiver indisponível
+- **Narrativa executiva** gerada pelo Claude Haiku 4.5 (~400 palavras, 4 seções estruturadas): Resumo Executivo, Ameaças Prioritárias, Recomendações Imediatas, Avaliação de Risco
+- Fallback automático para resumo estático se a API Anthropic estiver indisponível ou bloqueada
 - **Exportação PDF** com logo, seções de findings e tabelas de evidências (`exportThreatReportPdf`)
 
 ## 4. Requisitos Não Funcionais
@@ -254,7 +254,7 @@ Geração sob demanda de um relatório executivo consolidado:
 | Latência do dashboard | < 2s com consultas à store in-memory |
 | Volume esperado | Até ~500 eventos/hora por signal |
 | SSL | Certificado autoassinado no Seq — verificação desabilitada |
-| TLS externo (Datadog/GoCache/Gemini) | `rejectUnauthorized: false` no WSL (WSL não resolve a cadeia de CA) |
+| TLS externo (Datadog/GoCache/Anthropic) | `rejectUnauthorized: false` no WSL (WSL não resolve a cadeia de CA) |
 | Autenticação no Seq | Desabilitada — endpoint público sem credenciais |
 | Banco de dados local | SQLite (`better-sqlite3`), arquivo `data/events.db` — sem Docker necessário |
 | GoCache paginação | Até 500 eventos WAF e 300 bot via parâmetro `page` |
@@ -415,16 +415,18 @@ Autenticação via header `GoCache-Token: <token>`. Consultas paralelas às últ
 **Detecção de ferramentas** (função `detectTool`): identifica ferramentas ofensivas pelo User-Agent:
 SQLMap, Nikto, Dart, Python, curl, Go, Java, Headless (browsers headless).
 
-### 9.3 Gemini API (`generativelanguage.googleapis.com`)
+### 9.3 Anthropic API (`api.anthropic.com`)
 
-Autenticação via query param `key=GEMINI_API_KEY`.
+Autenticação via header `x-api-key: ANTHROPIC_API_KEY` + header `anthropic-version: 2023-06-01`.
 
 | Campo | Valor |
 |-------|-------|
-| Endpoint | `POST /v1beta/models/gemini-2.0-flash:generateContent?key=KEY` |
-| Model | `gemini-2.0-flash` |
+| Endpoint | `POST /v1/messages` |
+| Model | `claude-haiku-4-5-20251001` |
 | Uso | Narrativa executiva do Relatório de Ameaças |
-| Prompt | ~400 palavras, 4 seções estruturadas: contexto, ameaças detectadas, recomendações, conclusão |
-| Fallback | Resumo estático gerado localmente se API indisponível ou timeout |
+| Prompt | ~400 palavras, 4 seções estruturadas: Resumo Executivo, Ameaças Prioritárias, Recomendações Imediatas, Avaliação de Risco |
+| Fallback | Resumo estático gerado localmente se API indisponível, timeout ou bloqueio de proxy |
 
-O cliente HTTP está em `lib/geminiClient.ts`. A chamada é feita sob demanda apenas quando `GET /api/report/threat` é invocado — não há cache persistente da narrativa.
+O cliente HTTP está em `lib/geminiClient.ts` (nome mantido por compatibilidade interna). A chamada é feita sob demanda apenas quando `GET /api/report/threat` é invocado.
+
+> Nota: `generativelanguage.googleapis.com` (Gemini) está bloqueado pelo Forcepoint na rede corporativa. `api.anthropic.com` está acessível.
