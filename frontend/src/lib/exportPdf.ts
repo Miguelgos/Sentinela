@@ -2,7 +2,31 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import type { KongAuthStats, StatsSummary, TimelineEntry, AuthErrorStats, SecurityStats } from "./api";
+import type { KongAuthStats, StatsSummary, TimelineEntry, AuthErrorStats, SecurityStats, ThreatReport, RiskLevel } from "./api";
+
+// ── Logo preload (rasterize SVG → PNG data URL on first import) ────────────
+let _logoDataUrl: string | null = null;
+
+fetch("/sentinela_v1_radar_pulso.svg")
+  .then((r) => r.text())
+  .then((svgText) => {
+    const blob    = new Blob([svgText], { type: "image/svg+xml" });
+    const blobUrl = URL.createObjectURL(blob);
+    const img     = new Image();
+    img.onload = () => {
+      const canvas  = document.createElement("canvas");
+      canvas.width  = 800;
+      canvas.height = 320;
+      const ctx = canvas.getContext("2d");
+      if (ctx) {
+        ctx.drawImage(img, 0, 0, 800, 320);
+        _logoDataUrl = canvas.toDataURL("image/png");
+      }
+      URL.revokeObjectURL(blobUrl);
+    };
+    img.src = blobUrl;
+  })
+  .catch(() => {});
 
 // ── Palette ────────────────────────────────────────────────────────────────
 const BRAND  = "#1d4ed8";
@@ -96,8 +120,13 @@ function header(doc: jsPDF, title: string, subtitle = "Ituran · integra-prd · 
   doc.setFillColor(BRAND);
   doc.rect(0, 0, 210, 28, "F");
 
-  // Logo icon (top-right of header bar)
-  drawLogo(doc, 196, 14);
+  // Logo — rasterised SVG on the right side of the header band
+  // SVG is 800×320 (2.5:1); at width=55mm → height=22mm, y=3mm centres it in 28mm band
+  if (_logoDataUrl) {
+    doc.addImage(_logoDataUrl, "PNG", 148, 3, 55, 22);
+  } else {
+    drawLogo(doc, 196, 14);
+  }
 
   doc.setFontSize(16);
   doc.setTextColor("#ffffff");
@@ -329,7 +358,7 @@ export function exportDashboardPdf(
 
 // ── GUID vazio ─────────────────────────────────────────────────────────────
 export function exportErrorAnalysisPdf(
-  events: { total: number; data: { id: number; timestamp: string; user_id: string | null; level: string; message: string | null; request_path: string | null }[] },
+  events: { total: number; data: { id: string | number; timestamp: string; user_id: string | null; level: string; message: string | null; request_path: string | null }[] },
   timeline: { hour: string; count: string; unique_users: string }[],
   names: Record<string, string>,
 ) {
@@ -531,4 +560,169 @@ export function exportSecurityPdf(stats: SecurityStats) {
 
   footers(doc, "Análise de Segurança", n);
   doc.save(`security-${stamp()}.pdf`);
+}
+
+// ── Threat Report ──────────────────────────────────────────────────────────
+const RISK_LABEL: Record<RiskLevel, string> = {
+  CRITICAL: "CRÍTICO", HIGH: "ALTO", MEDIUM: "MÉDIO", LOW: "BAIXO", INFO: "INFO",
+};
+const RISK_COLOR: Record<RiskLevel, string> = {
+  CRITICAL: RED, HIGH: ORANGE, MEDIUM: YELLOW, LOW: GREEN, INFO: BRAND,
+};
+
+export function exportThreatReportPdf(report: ThreatReport) {
+  const doc  = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const rLvl = report.riskLevel;
+  const { startY, now: n } = header(
+    doc,
+    "Relatório de Ameaças Cibernéticas",
+    "Ituran · salesbo · Análise Automatizada — Gemini 2.0 Flash",
+  );
+
+  // ── Summary box ────────────────────────────────────────────────────────────
+  let y = summaryBox(doc, startY, [
+    ["Risco Geral",         RISK_LABEL[rLvl],                                             RISK_COLOR[rLvl]],
+    ["Ameaças Detectadas",  report.findings.length.toString(),                             report.findings.length > 0 ? ORANGE : GREEN],
+    ["Seq — Eventos",       report.sources.seq.events.toLocaleString("pt-BR"),             report.sources.seq.ok     ? GREEN : RED],
+    ["Datadog — Alertas",   report.sources.datadog.alerts.toString(),                      report.sources.datadog.ok ? (report.sources.datadog.alerts > 0 ? ORANGE : GREEN) : RED],
+    ["GoCache — Bloqueios", report.sources.gocache.blocked.toLocaleString("pt-BR"),        report.sources.gocache.ok ? (report.sources.gocache.blocked > 0 ? ORANGE : GREEN) : RED],
+    ["Gerado em",           format(new Date(report.generatedAt), "dd/MM/yyyy HH:mm", { locale: ptBR })],
+  ]);
+
+  // ── Sources table ──────────────────────────────────────────────────────────
+  y = checkPage(doc, y, 35);
+  y = section(doc, y, "Fontes de Dados");
+  autoTable(doc, {
+    startY: y,
+    head: [["Fonte", "Status", "Período", "Métrica"]],
+    body: [
+      ["Seq (Logs de Aplicação)", report.sources.seq.ok     ? "OK" : "ERRO", "Acumulado",  `${report.sources.seq.events.toLocaleString("pt-BR")} eventos`],
+      ["Datadog (Monitores)",     report.sources.datadog.ok ? "OK" : "ERRO", "Tempo real", `${report.sources.datadog.alerts} monitor(es) em alerta`],
+      ["GoCache WAF",             report.sources.gocache.ok ? "OK" : "ERRO", "Últimas 24h", `${report.sources.gocache.blocked.toLocaleString("pt-BR")} eventos bloqueados`],
+    ],
+    styles:     { fontSize: 8, cellPadding: 2.5 },
+    headStyles: { fillColor: BRAND, textColor: "#fff", fontStyle: "bold" },
+    columnStyles: { 1: { cellWidth: 22 } },
+    didParseCell: (data) => {
+      if (data.column.index === 1 && data.section === "body") {
+        data.cell.styles.textColor = data.cell.text[0] === "OK" ? GREEN : RED;
+        data.cell.styles.fontStyle = "bold";
+      }
+    },
+    margin: { left: 14, right: 14 },
+  });
+  y = (doc as LastTable).lastAutoTable.finalY + 6;
+
+  // ── Findings ───────────────────────────────────────────────────────────────
+  y = checkPage(doc, y, 40);
+  y = section(doc, y, `Ameaças Detectadas — ${report.findings.length} achado(s)`, RISK_COLOR[rLvl]);
+
+  if (report.findings.length === 0) {
+    doc.setFontSize(9);
+    doc.setFont("helvetica", "italic");
+    doc.setTextColor(GREEN);
+    doc.text("Nenhuma ameaça crítica identificada nas últimas 24 horas.", 14, y);
+    doc.setTextColor("#000");
+    y += 8;
+  } else {
+    // Findings overview table
+    autoTable(doc, {
+      startY: y,
+      head: [["Risco", "Regra", "Título", "Descrição"]],
+      body: report.findings.map((f) => [
+        RISK_LABEL[f.risk],
+        f.rule,
+        f.title,
+        f.description,
+      ]),
+      styles:     { fontSize: 7.5, cellPadding: 2 },
+      headStyles: { fillColor: BRAND, textColor: "#fff", fontStyle: "bold" },
+      columnStyles: {
+        0: { cellWidth: 18 },
+        1: { cellWidth: 38 },
+        2: { cellWidth: 50 },
+        3: { cellWidth: 76 },
+      },
+      didParseCell: (data) => {
+        if (data.column.index === 0 && data.section === "body") {
+          const lbl = data.cell.text[0] as RiskLevel;
+          const col = Object.entries(RISK_LABEL).find(([, v]) => v === lbl)?.[0] as RiskLevel | undefined;
+          data.cell.styles.textColor = col ? RISK_COLOR[col] : GRAY;
+          data.cell.styles.fontStyle = "bold";
+        }
+      },
+      margin: { left: 14, right: 14 },
+    });
+    y = (doc as LastTable).lastAutoTable.finalY + 6;
+
+    // Per-finding evidence detail
+    for (const f of report.findings) {
+      if (f.evidence.length === 0) continue;
+      y = checkPage(doc, y, 30);
+      const fColor = RISK_COLOR[f.risk];
+      y = section(doc, y, `${RISK_LABEL[f.risk]} · ${f.title}`, fColor);
+      autoTable(doc, {
+        startY: y,
+        head: [["Evidências"]],
+        body:  f.evidence.map((ev) => [ev]),
+        styles:     { fontSize: 7.5, cellPadding: 2 },
+        headStyles: { fillColor: fColor, textColor: "#fff", fontStyle: "bold" },
+        margin: { left: 14, right: 14 },
+      });
+      y = (doc as LastTable).lastAutoTable.finalY + 4;
+    }
+  }
+
+  // ── Gemini Narrative ───────────────────────────────────────────────────────
+  y = checkPage(doc, y, 40);
+  y = section(doc, y, "Análise IA — Gemini 2.0 Flash");
+
+  const narrativeLines = report.narrative.split("\n").filter((l) => l.trim() !== "");
+  for (const line of narrativeLines) {
+    const trimmed   = line.trim();
+    const isHeading = /^\*\*[^*]+\*\*/.test(trimmed) || /^#{1,3}\s/.test(trimmed);
+    const isBullet  = /^[•\-*] /.test(trimmed) && !isHeading;
+    const cleaned   = trimmed
+      .replace(/^\*\*(.+)\*\*$/, "$1")
+      .replace(/^#{1,3}\s/, "")
+      .replace(/\*\*(.+?)\*\*/g, "$1")
+      .trim();
+
+    if (isHeading) {
+      y = checkPage(doc, y, 12);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(9.5);
+      doc.setTextColor(BRAND);
+      doc.text(cleaned, 14, y);
+      y += 6;
+    } else if (isBullet) {
+      const body    = cleaned.replace(/^[•\-*]\s*/, "");
+      const wrapped = doc.splitTextToSize(`• ${body}`, 174);
+      y = checkPage(doc, y, wrapped.length * 4.5 + 2);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor("#374151");
+      doc.text(wrapped, 18, y);
+      y += wrapped.length * 4.5 + 1;
+    } else if (cleaned) {
+      const wrapped = doc.splitTextToSize(cleaned, 182);
+      y = checkPage(doc, y, wrapped.length * 4.5 + 2);
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(8.5);
+      doc.setTextColor("#374151");
+      doc.text(wrapped, 14, y);
+      y += wrapped.length * 4.5 + 1;
+    }
+  }
+
+  // Gemini disclaimer
+  y += 4;
+  y = checkPage(doc, y, 10);
+  doc.setFont("helvetica", "italic");
+  doc.setFontSize(7);
+  doc.setTextColor(GRAY);
+  doc.text("Esta análise foi gerada automaticamente por Gemini 2.0 Flash e deve ser revisada por um analista de segurança.", 14, y, { maxWidth: 182 });
+
+  footers(doc, "Relatório de Ameaças", n);
+  doc.save(`relatorio-ameacas-${stamp()}.pdf`);
 }

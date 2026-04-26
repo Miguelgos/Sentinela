@@ -2,7 +2,7 @@
 
 ## 1. Visão Geral
 
-O **Sentinela** é um dashboard web interno de inteligência de logs e segurança para o serviço `salesbo` (Sales Backoffice) da Ituran, hospedado no Seq em `https://seq-prd.ituran.sp`. O objetivo é dar visibilidade sobre padrões de erro recorrentes, correlacionar eventos com usuários reais, detectar anomalias de segurança, monitorar infraestrutura via Datadog e acompanhar proteção de perímetro via GoCache WAF.
+O **Sentinela** é um dashboard web interno de inteligência de logs e segurança para o serviço `salesbo` (Sales Backoffice) da Ituran, hospedado no Seq em `https://seq-prd.ituran.sp`. O objetivo é dar visibilidade sobre padrões de erro recorrentes, correlacionar eventos com usuários reais, detectar anomalias de segurança, monitorar infraestrutura via Datadog, acompanhar proteção de perímetro via GoCache WAF e gerar relatórios executivos de ameaças com correlação cruzada e narrativa gerada por IA (Gemini 2.0 Flash).
 
 ## 2. Problemas Mapeados
 
@@ -53,13 +53,17 @@ Padrões identificados nos logs com severidade classificada (Critical / High / M
 
 ### 2.5 Datadog — Infraestrutura
 
-Monitoramento da infraestrutura Windows (IIS + SQL Server) e do estado de monitores Datadog:
+Monitoramento da infraestrutura Windows (IIS + SQL Server), estado de monitores Datadog e observabilidade de serviços:
 
 - Estado dos monitores (Alert / Warn / OK / No Data)
 - Volume de logs por serviço (últimas 4h)
 - Hosts ativos e suas aplicações
 - Métricas IIS: conexões ativas, requisições GET/POST por site, bytes transferidos, erros 404
-- Métricas SQL Server: conexões bloqueadas, full table scans/s
+- Métricas SQL Server: conexões bloqueadas, full table scans/s, page life expectancy, user connections, batch requests/s
+- **SLOs**: lista e limiares via `GET /api/v1/slo`
+- **Downtimes ativos**: janelas de manutenção via `GET /api/v1/downtime`
+- **Incidentes ativos**: incidentes em curso via `GET /api/v2/incidents`
+- **Infra metrics** (endpoint `/api/datadog/infra`): CPU por host (`avg:system.cpu.user`), memória usada em GB (`avg:system.mem.used`), disco em % (`avg:system.disk.in_use`), rede em Mbps (`sum:system.net.bytes_rcvd`), restarts de pods K8s (`sum:kubernetes.containers.restarts by{kube_deployment}`), CPU de containers (`avg:container.cpu.usage by{container_name}`)
 
 ### 2.6 GoCache WAF — Proteção de Perímetro
 
@@ -70,6 +74,21 @@ Monitoramento dos eventos de segurança de borda nas últimas 24h:
 - Bots detectados e bloqueados
 - Bots em modo monitor (simulação)
 - Top IPs atacantes, tipos de ataque, URIs e hosts mais visados
+- **Paginação multi-página**: até 500 eventos WAF e 300 eventos bot via parâmetro `page` no corpo da requisição
+- **Classificação de ataques**: SQLi, XSS, PathTraversal, Scanner, Protocol, Other
+- **Detecção de ferramentas ofensivas**: SQLMap, Nikto, Dart, Python, curl, Go, Java, Headless (via User-Agent)
+- **Timeline horária**: volume de eventos WAF, Bot e Firewall por hora
+- **Concentração geográfica**: ranking de países de origem dos ataques
+- **Tipos de bot e user-agents ofensivos**: breakdown de `botTypes` e `userAgentTools`
+- **Totais consolidados** (`totals`) e distribuição por método HTTP (`byMethod`)
+
+### 2.7 Relatório de Ameaças Cibernéticas
+
+Geração sob demanda de um relatório executivo consolidado:
+
+- **12 regras de correlação cruzada** sobre dados de Seq, Datadog e GoCache: `BRUTE_FORCE`, `ANOMALOUS_USERNAMES`, `WAF_INJECTION`, `MULTI_SOURCE_IP`, `EXPIRED_CERTS`, `DATADOG_ALERT`, `HIGH_ERROR_RATE`, `ACTIVE_INCIDENT`, `SCANNER_DETECTED`, `BOT_ATTACK`, `INFRA_STRESS`, `GEO_CONCENTRATION`
+- **Narrativa executiva** gerada pelo Gemini 2.0 Flash: ~400 palavras em 4 seções estruturadas (contexto, ameaças detectadas, recomendações, conclusão); fallback estático se API indisponível
+- **Exportação PDF** com logo Sentinela, seções de findings e tabelas de evidências (`exportThreatReportPdf`)
 
 ## 3. Requisitos Funcionais
 
@@ -164,8 +183,9 @@ Monitoramento dos eventos de segurança de borda nas últimas 24h:
 - Todas as páginas de análise têm botão "Exportar PDF"
 - PDF inclui: cabeçalho azul com logo Sentinela + título/subtítulo/data de geração, rodapé com paginação, tabelas e seções
 - Fonte Helvetica (CP1252) — sem emoji ou símbolos Unicode acima de U+00FF nos títulos
-- Logo desenhado com primitivas jsPDF (shield + eye) — sem dependência de arquivo externo
+- Logo: arquivo SVG `sentinela_v1_radar_pulso.svg` rasterizado via Canvas API no carregamento do módulo e embutido como PNG em todos os cabeçalhos
 - Arquivo salvo com nome `{pagina}-{yyyy-MM-dd_HH-mm}.pdf`
+- Páginas com PDF: Dashboard (`exportDashboardPdf`), GUID Cotação vazio (`exportErrorAnalysisPdf`), Falhas de Autenticação (`exportAuthErrorPdf`), Kong Auth (`exportKongAuthPdf`), Segurança (`exportSecurityPdf`), Relatório de Ameaças (`exportThreatReportPdf`)
 
 ### RF-12: Lookup de pessoa
 
@@ -179,6 +199,9 @@ Monitoramento dos eventos de segurança de borda nas últimas 24h:
 - **Monitores**: contagem por estado (Alert/Warn/OK/No Data), lista dos em alerta/warn, alertas de licença
 - **Logs**: volume por serviço (error/warn/info) nas últimas 4h via `/api/v2/logs/events`
 - **Hosts**: lista de hosts ativos com aplicações via `/api/v1/hosts`
+- **SLOs**: lista e limiares via `/api/v1/slo`
+- **Downtimes ativos**: janelas de manutenção em curso via `/api/v1/downtime`
+- **Incidentes ativos**: incidentes em curso via `/api/v2/incidents`
 - **Métricas IIS** (última hora via `/api/v1/query`):
   - Conexões ativas por host
   - Requisições GET + POST por site
@@ -187,38 +210,70 @@ Monitoramento dos eventos de segurança de borda nas últimas 24h:
 - **Métricas SQL Server** (última hora):
   - Conexões bloqueadas por host
   - Full table scans/s por host
+  - Page life expectancy por host
+  - User connections por host
+  - Batch requests/s por host
+- **Métricas de infra** (`/api/datadog/infra`):
+  - CPU por host (`avg:system.cpu.user{*}by{host}`)
+  - Memória usada em GB por host (`avg:system.mem.used{*}by{host}`)
+  - Disco em uso % por host (`avg:system.disk.in_use{*}by{host}`)
+  - Rede recebida Mbps por host (`sum:system.net.bytes_rcvd{*}by{host}`)
+  - Restarts de pods K8s por deployment (`sum:kubernetes.containers.restarts{*}by{kube_deployment}`)
+  - CPU de containers (`avg:container.cpu.usage{*}by{container_name}`)
 
 ### RF-14: GoCache WAF — Proteção de Perímetro
 
 - Conectar à API GoCache via header `GoCache-Token: <token>`
-- **Resumo 24h**: total WAF bloqueados, firewall bloqueados, bots bloqueados, bots em modo monitor
+- **Resumo 24h**: totais consolidados (`totals`) — WAF bloqueados, firewall bloqueados, bots bloqueados, bots em modo monitor
+- **Paginação**: até 500 eventos WAF e 300 eventos bot via parâmetro `page` no corpo da requisição
 - **Análise**: top IPs atacantes, top tipos de ataque WAF, top URIs atacadas, top hosts visados
-- **Eventos recentes**: tabelas dos últimos eventos WAF, firewall e bot (máx. 100 cada por limitação da API)
+- **Classificação de ataques**: categorias SQLi, XSS, PathTraversal, Scanner, Protocol, Other
+- **Detecção de ferramentas**: SQLMap, Nikto, Dart, Python, curl, Go, Java, Headless via User-Agent
+- **Timeline horária**: volume de eventos WAF, Bot e Firewall por hora (`timeline`)
+- **Concentração geográfica**: ranking de países de origem dos ataques (`byCountry`)
+- **Tipos de bot**: breakdown de `botTypes` e `userAgentTools`
+- **Distribuição por método HTTP**: `byMethod`
 - Banner de contexto com domínios protegidos e totais do dia
+
+### RF-15: Relatório de Ameaças Cibernéticas
+
+- Geração sob demanda via `GET /api/report/threat`
+- **12 regras de correlação cruzada** sobre dados de Seq, Datadog e GoCache: `BRUTE_FORCE`, `ANOMALOUS_USERNAMES`, `WAF_INJECTION`, `MULTI_SOURCE_IP`, `EXPIRED_CERTS`, `DATADOG_ALERT`, `HIGH_ERROR_RATE`, `ACTIVE_INCIDENT`, `SCANNER_DETECTED`, `BOT_ATTACK`, `INFRA_STRESS`, `GEO_CONCENTRATION`
+- Cada regra produz: status (triggered/clear), severidade, descrição e evidências tabuladas
+- **Narrativa executiva** gerada pelo Gemini 2.0 Flash (~400 palavras, 4 seções estruturadas): contexto, ameaças detectadas, recomendações, conclusão
+- Fallback automático para resumo estático se a API Gemini estiver indisponível
+- **Exportação PDF** com logo, seções de findings e tabelas de evidências (`exportThreatReportPdf`)
 
 ## 4. Requisitos Não Funcionais
 
 | Requisito | Valor |
 |-----------|-------|
 | Janela de queries de stats | Últimas 4 horas (`STATS_WINDOW`) |
-| Retenção de dados local | 6 horas (deletado após cada ciclo de auto-sync) |
-| Latência do dashboard | < 2s com índice trigram e janela de 4h |
+| Retenção de dados local | Tier A (eventos críticos): 90 dias; Tier B (informativos): 7 dias |
+| Store in-memory | Map em `accumulator.ts` para consultas de stats sem I/O de disco |
+| Latência do dashboard | < 2s com consultas à store in-memory |
 | Volume esperado | Até ~500 eventos/hora por signal |
 | SSL | Certificado autoassinado no Seq — verificação desabilitada |
-| TLS externo (Datadog/GoCache) | `rejectUnauthorized: false` no WSL (WSL não resolve a cadeia de CA) |
+| TLS externo (Datadog/GoCache/Gemini) | `rejectUnauthorized: false` no WSL (WSL não resolve a cadeia de CA) |
 | Autenticação no Seq | Desabilitada — endpoint público sem credenciais |
-| PostgreSQL | `max_parallel_workers_per_gather = 0` para evitar esgotamento de memória compartilhada |
-| GoCache API limit | Máximo 100 eventos por requisição |
+| Banco de dados local | SQLite (`better-sqlite3`), arquivo `data/events.db` — sem Docker necessário |
+| GoCache paginação | Até 500 eventos WAF e 300 bot via parâmetro `page` |
 
 ## 5. Modelo de Dados
 
-### 5.1 seq_events
+O armazenamento principal é um arquivo SQLite (`data/events.db`) gerenciado por `db/sqlite.ts` com retenção em dois tiers. Paralelamente, `accumulator.ts` mantém uma store in-memory (Map) com os eventos recentes para servir as queries de stats sem I/O de disco.
+
+**Tiered retention:**
+- **Tier A** (eventos críticos — Error, security findings, auth failures): retenção de 90 dias
+- **Tier B** (eventos informativos): retenção de 7 dias
+
+### 5.1 seq_events (SQLite)
 
 | Coluna | Tipo | Descrição |
 |--------|------|-----------|
-| `id` | SERIAL PK | Chave interna |
+| `id` | INTEGER PK | Chave interna (autoincrement) |
 | `event_id` | TEXT UNIQUE | ID do evento no Seq (evita duplicatas) |
-| `timestamp` | TIMESTAMPTZ | Timestamp original do evento |
+| `timestamp` | TEXT | Timestamp original do evento (ISO 8601) |
 | `message_template` | TEXT | Template CLEF (`@mt`) |
 | `message` | TEXT | Mensagem renderizada |
 | `level` | TEXT | Error / Warning / Information / etc |
@@ -230,44 +285,32 @@ Monitoramento dos eventos de segurança de borda nas últimas 24h:
 | `environment` | TEXT | Ambiente (`dd_env`) |
 | `request_path` | TEXT | Caminho HTTP da requisição |
 | `source_context` | TEXT | Namespace/classe de origem do log |
-| `raw_data` | JSONB | Evento completo em JSON (inclui Properties array) |
-| `created_at` | TIMESTAMPTZ | Quando foi inserido localmente |
+| `raw_data` | TEXT | Evento completo em JSON (serializado) |
+| `created_at` | TEXT | Quando foi inserido localmente (ISO 8601) |
 
 **Índices relevantes:**
 - `UNIQUE (event_id)` — deduplicação
-- `GIN (message gin_trgm_ops)` — aceleração de ILIKE (requer `pg_trgm`)
-- `(timestamp)` — filtros de janela temporal
+- `(timestamp)` — filtros de janela temporal e retenção por tier
 
-### 5.2 sync_config
-
-| Coluna | Tipo | Descrição |
-|--------|------|-----------|
-| `id` | SERIAL PK | |
-| `seq_url` | TEXT | URL base do Seq |
-| `api_key` | TEXT | API Key (quando usada) |
-| `signal` | TEXT | Signal ID do Seq |
-| `last_synced_at` | TIMESTAMPTZ | Última sincronização |
-| `last_count` | INTEGER | Eventos importados na última sync |
-
-## 6. Fluxo de Sincronização (Auto-sync Incremental)
+## 6. Fluxo de Polling (Accumulator)
 
 ```
-Backend (auto-sync, 60s)
+accumulator.ts (polling contínuo)
   │
-  ├─ Se primeira execução (newestEventId === undefined):
-  │      └─ adiciona fromDateUtc = NOW() - 6h à URL do Seq
-  │
-  ├─ GET /api/events/?count=1000&signal=signal-m33301&render=true[&afterId=...][&fromDateUtc=...]
+  ├─ seq.ts: GET /api/events/?count=1000&signal=signal-m33301&render=true[&afterId=...]
   │      └─ Seq retorna array de SeqApiEvent
   │
   ├─ Para cada página:
   │      ├─ parseSeqApiEvent() → extrai campos normalizados
   │      ├─ Se encontrar newestEventId na página → pára paginação (incremental)
-  │      └─ upsertEvents() → INSERT ... ON CONFLICT (event_id) DO NOTHING
+  │      ├─ Adiciona evento à store in-memory (Map<event_id, SeqEvent>)
+  │      └─ db/sqlite.ts: upsert → INSERT OR IGNORE (event_id)
   │
   ├─ Atualiza newestEventId com o evento mais recente visto
   │
-  └─ deleteOldEvents(6) → DELETE WHERE timestamp < NOW() - 6h
+  └─ Retenção por tier:
+       ├─ Tier A (críticos): remove da store/SQLite após 90 dias
+       └─ Tier B (informativos): remove da store/SQLite após 7 dias
 ```
 
 ## 7. Extração de Campos
@@ -282,15 +325,9 @@ Backend (auto-sync, 60s)
 | ClientId (auth errors) | `ClientId:\s*(\S+)\s*\|` | `ClientId: salesBackoffice \|` |
 | StatusCode (auth errors) | `StatusCode:\s*(\S+)\s*\|` | `StatusCode: Unauthorized \|` |
 
-### 7.2 Por JSONB (Kong Auth)
+### 7.2 Por JSON (Kong Auth)
 
-Propriedades armazenadas em `raw_data->'Properties'` como array `[{"Name": "X", "Value": Y}]`:
-
-```sql
-(SELECT (elem->>'Value')::int
- FROM jsonb_array_elements(raw_data->'Properties') elem
- WHERE elem->>'Name' = 'StatusCode')
-```
+Propriedades armazenadas em `raw_data` (TEXT serializado como JSON) como array `Properties: [{"Name": "X", "Value": Y}]`. O backend faz parse em memória via `JSON.parse()` e extrai os campos pelo nome:
 
 Propriedades extraídas: `StatusCode` (int), `Username` (text), `ClientIp` (text), `Path` (text), `Module` (text).
 
@@ -306,6 +343,7 @@ Propriedades extraídas: `StatusCode` (int), `Username` (text), `ClientIp` (text
 | Segurança | `security` | `SecurityAnalysis.tsx` | `exportSecurityPdf` |
 | Datadog | `datadog` | `DatadogAnalysis.tsx` | — |
 | GoCache WAF | `gocache` | `GoCacheAnalysis.tsx` | — |
+| Relatório de Ameaças | `report` | `ReportAnalysis.tsx` | `exportThreatReportPdf` |
 | Configurar Sync | `sync` | `SyncConfig.tsx` | — |
 
 ## 9. Integrações Externas
@@ -319,9 +357,12 @@ Autenticação via `DD-API-KEY` + `DD-APPLICATION-KEY`. Endpoints consumidos:
 | `GET /api/v1/monitor` | Estado de todos os monitores |
 | `GET /api/v2/logs/events` | Logs das últimas 4h (volume por serviço) |
 | `GET /api/v1/hosts` | Lista de hosts ativos |
-| `GET /api/v1/query` | Métricas IIS e SQL Server (série temporal, última hora) |
+| `GET /api/v1/slo` | SLOs e limiares configurados |
+| `GET /api/v1/downtime` | Downtimes ativos (janelas de manutenção) |
+| `GET /api/v2/incidents` | Incidentes ativos em curso |
+| `GET /api/v1/query` | Métricas de série temporal (IIS, SQL Server, infra) |
 
-Métricas consultadas via `/api/v1/query`:
+Métricas consultadas via `/api/v1/query` — endpoint `/api/datadog/metrics` (IIS e SQL Server):
 
 | Métrica | Agrupamento | Significado |
 |---------|------------|-------------|
@@ -332,12 +373,24 @@ Métricas consultadas via `/api/v1/query`:
 | `sum:iis.errors.not_found{*}` | `by{host}` | Taxa de erros 404/s |
 | `avg:sqlserver.activity.blocked_connections{*}` | `by{host}` | Conexões SQL bloqueadas |
 | `avg:sqlserver.access.full_scans{*}` | `by{host}` | Full table scans/s |
+| `avg:sqlserver.performance.page_life_expectancy{*}` | `by{host}` | Page life expectancy (Buffer Pool) |
+| `avg:sqlserver.activity.user_connections{*}` | `by{host}` | Conexões de usuário ativas |
+| `avg:sqlserver.performance.batch_requests_sec{*}` | `by{host}` | Batch requests/s |
 
-> Nota: métricas `system.cpu.*` e `system.mem.*` não estão disponíveis neste ambiente — o agente Datadog monitora IIS/SQL Server Windows, não métricas de host genéricas.
+Métricas consultadas via `/api/v1/query` — endpoint `/api/datadog/infra` (infraestrutura de host):
 
-### 9.2 GoCache WAF
+| Métrica | Agrupamento | Significado |
+|---------|------------|-------------|
+| `avg:system.cpu.user{*}` | `by{host}` | CPU de usuário (%) por host |
+| `avg:system.mem.used{*}` | `by{host}` | Memória usada (GB) por host |
+| `avg:system.disk.in_use{*}` | `by{host}` | Disco em uso (%) por host |
+| `sum:system.net.bytes_rcvd{*}` | `by{host}` | Rede recebida (Mbps) por host |
+| `sum:kubernetes.containers.restarts{*}` | `by{kube_deployment}` | Restarts de pods K8s por deployment |
+| `avg:container.cpu.usage{*}` | `by{container_name}` | CPU de containers (%) |
 
-Autenticação via header `GoCache-Token: <token>`. Consultas paralelas às últimas 24h:
+### 9.2 GoCache WAF (`api.gocache.com.br`)
+
+Autenticação via header `GoCache-Token: <token>`. Consultas paralelas às últimas 24h com paginação:
 
 | Tipo | Action | Significado |
 |------|--------|-------------|
@@ -346,4 +399,32 @@ Autenticação via header `GoCache-Token: <token>`. Consultas paralelas às últ
 | `bot-mitigation` | `block` | Bots detectados e bloqueados |
 | `bot-mitigation` | `simulate` | Bots detectados em modo monitor |
 
-Limite da API GoCache: 100 eventos por requisição. O campo `size` da resposta indica o total real de eventos no período.
+**Paginação**: o parâmetro `page` é passado no corpo da requisição POST. O backend itera páginas até esgotar os resultados, com limite máximo de 500 eventos WAF e 300 eventos bot.
+
+**Classificação de ataques** (função `classifyAttack`): cada evento WAF é classificado em uma categoria:
+
+| Categoria | Critério |
+|-----------|---------|
+| `SQLi` | Padrões de SQL Injection no payload ou tipo de ataque |
+| `XSS` | Padrões de Cross-Site Scripting |
+| `PathTraversal` | Tentativas de traversal de diretório (`../`) |
+| `Scanner` | User-Agents ou padrões de scanner de vulnerabilidades |
+| `Protocol` | Violações de protocolo HTTP |
+| `Other` | Demais ataques não classificados |
+
+**Detecção de ferramentas** (função `detectTool`): identifica ferramentas ofensivas pelo User-Agent:
+SQLMap, Nikto, Dart, Python, curl, Go, Java, Headless (browsers headless).
+
+### 9.3 Gemini API (`generativelanguage.googleapis.com`)
+
+Autenticação via query param `key=GEMINI_API_KEY`.
+
+| Campo | Valor |
+|-------|-------|
+| Endpoint | `POST /v1beta/models/gemini-2.0-flash:generateContent?key=KEY` |
+| Model | `gemini-2.0-flash` |
+| Uso | Narrativa executiva do Relatório de Ameaças |
+| Prompt | ~400 palavras, 4 seções estruturadas: contexto, ameaças detectadas, recomendações, conclusão |
+| Fallback | Resumo estático gerado localmente se API indisponível ou timeout |
+
+O cliente HTTP está em `lib/geminiClient.ts`. A chamada é feita sob demanda apenas quando `GET /api/report/threat` é invocado — não há cache persistente da narrativa.

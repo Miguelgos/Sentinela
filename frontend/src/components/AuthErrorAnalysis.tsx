@@ -258,10 +258,10 @@ export function AuthErrorAnalysis() {
                       onClick={() => setSelected(event)}
                     >
                       <td className="p-2 text-xs font-mono whitespace-nowrap">{formatTimestamp(event.timestamp)}</td>
-                      <td className="p-2 text-xs font-mono text-amber-300">{extractEmail(event.message)}</td>
-                      <td className="p-2 text-xs font-mono text-muted-foreground">{extractClientId(event.message)}</td>
+                      <td className="p-2 text-xs font-mono text-amber-300">{extractEmail(event.message || "")}</td>
+                      <td className="p-2 text-xs font-mono text-muted-foreground">{extractClientId(event.message || "")}</td>
                       <td className="p-2 text-xs">
-                        <Badge variant="error">{extractStatusCode(event.message)}</Badge>
+                        <Badge variant="error">{extractStatusCode(event.message || "")}</Badge>
                       </td>
                       <td className="p-2 text-xs font-mono text-muted-foreground">
                         {event.trace_id ? event.trace_id.slice(0, 16) + "…" : "—"}
@@ -280,7 +280,7 @@ export function AuthErrorAnalysis() {
 
       {selected && (
         <EventDetail
-          event={selected as Parameters<typeof EventDetail>[0]["event"]}
+          event={selected as unknown as Parameters<typeof EventDetail>[0]["event"]}
           onClose={() => setSelected(null)}
         />
       )}

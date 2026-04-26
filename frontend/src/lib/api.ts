@@ -3,7 +3,7 @@ import axios from "axios";
 const api = axios.create({ baseURL: "/api" });
 
 export interface DbEvent {
-  id: number;
+  id: string;
   event_id: string | null;
   timestamp: string;
   message: string | null;
@@ -28,16 +28,10 @@ export interface EventsResponse {
 
 export interface EventFilters {
   level?: string;
-  service?: string;
-  userId?: string;
-  guidCotacao?: string;
-  requestPath?: string;
   search?: string;
-  startDate?: string;
-  endDate?: string;
+  emptyGuidOnly?: boolean;
   page?: number;
   pageSize?: number;
-  emptyGuidOnly?: boolean;
 }
 
 export interface StatsSummary {
@@ -59,97 +53,6 @@ export interface TimelineEntry {
   hour: string;
   level: string;
   count: string;
-}
-
-export interface SyncRequest {
-  seqUrl: string;
-  apiKey?: string;
-  username?: string;
-  password?: string;
-  signal?: string;
-  count?: number;
-  startDate?: string;
-  endDate?: string;
-}
-
-export const eventsApi = {
-  list: (filters: EventFilters = {}) =>
-    api.get<EventsResponse>("/events", { params: filters }).then((r) => r.data),
-
-  get: (id: number) => api.get<DbEvent>(`/events/${id}`).then((r) => r.data),
-
-  stats: () => api.get<StatsSummary>("/events/stats/summary").then((r) => r.data),
-
-  timeline: (hours?: number) =>
-    api
-      .get<TimelineEntry[]>("/events/stats/timeline", { params: { hours } })
-      .then((r) => r.data),
-
-  emptyGuidTimeline: () =>
-    api
-      .get<{ hour: string; count: string; unique_users: string }[]>(
-        "/events/stats/empty-guid-timeline"
-      )
-      .then((r) => r.data),
-
-  import: (events: unknown[]) =>
-    api.post<{ imported: number; skipped: number; total: number }>(
-      "/events/import",
-      events
-    ).then((r) => r.data),
-
-  generateSample: () =>
-    api.post<{ imported: number; message: string }>("/events/sample").then((r) => r.data),
-
-  clear: () => api.delete("/events").then((r) => r.data),
-
-  authErrorStats: () =>
-    api.get<AuthErrorStats>("/events/stats/auth-errors").then((r) => r.data),
-
-  securityStats: () =>
-    api.get<SecurityStats>("/events/stats/security").then((r) => r.data),
-
-  kongAuthStats: () =>
-    api.get<KongAuthStats>("/events/stats/kong-auth").then((r) => r.data),
-
-  datadogOverview: () =>
-    api.get<DatadogOverview>("/datadog/overview").then((r) => r.data),
-
-  gocacheOverview: () =>
-    api.get<GoCacheOverview>("/gocache/overview").then((r) => r.data),
-
-  datadogMetrics: () =>
-    api.get<DatadogMetrics>("/datadog/metrics").then((r) => r.data),
-};
-
-export const syncApi = {
-  login: (seqUrl: string, username: string, password: string) =>
-    api
-      .post<{ token: string }>("/sync/login", { seqUrl, username, password })
-      .then((r) => r.data),
-
-  sync: (body: SyncRequest) =>
-    api
-      .post<{ imported: number; skipped: number; total: number; pages: number }>("/sync", body)
-      .then((r) => r.data),
-
-  getConfig: () =>
-    api
-      .get<{
-        seq_url: string;
-        signal: string;
-        last_synced_at: string;
-        last_count: number;
-      } | null>("/sync/config")
-      .then((r) => r.data),
-};
-
-export interface PessoaStats {
-  user_id: string;
-  nm_pessoa: string | null;
-  total: number;
-  errors: number;
-  empty_guid: number;
 }
 
 export interface SecurityStats {
@@ -185,8 +88,8 @@ export interface KongAuthStats {
   topIPs: { client_ip: string; falhas: string; usuarios_unicos: string; first_seen: string; last_seen: string }[];
   credentialStuffing: { client_ip: string; usuarios_tentados: string; total_falhas: string; janela_min: string; first_seen: string; last_seen: string }[];
   anomalousUsernames: { username: string; client_ip: string; tentativas: string }[];
-  serverErrors: { timestamp: string; username: string; client_ip: string; path: string }[];
-  recentFailures: { id: number; timestamp: string; username: string; client_ip: string; path: string; status_code: number; module: string }[];
+  serverErrors: { timestamp: string; username: string | null; client_ip: string | null; path: string | null }[];
+  recentFailures: { id: number; timestamp: string; username: string | null; client_ip: string | null; path: string | null; status_code: number; module: string | null }[];
 }
 
 export interface AuthErrorStats {
@@ -195,39 +98,15 @@ export interface AuthErrorStats {
   topUsers: { email: string; count: string; last_seen: string }[];
   topClients: { client_id: string; count: string }[];
   recentEvents: {
-    id: number;
+    id: string | number;
     event_id: string;
     timestamp: string;
-    message: string;
+    message: string | null;
     level: string;
     trace_id: string | null;
     request_path: string | null;
   }[];
 }
-
-export interface AutoSyncStatus {
-  running: boolean;
-  intervalMs: number;
-  seqUrl: string;
-  signal: string;
-  lastRun: string | null;
-  lastImported: number;
-  lastTotal: number;
-  totalImported: number;
-  runs: number;
-  error: string | null;
-}
-
-export const autoSyncApi = {
-  start: (opts?: { seqUrl?: string; signal?: string; apiKey?: string; intervalMs?: number }) =>
-    api.post<{ message: string; status: AutoSyncStatus }>("/autosync/start", opts || {}).then((r) => r.data),
-
-  stop: () =>
-    api.post<{ message: string; status: AutoSyncStatus }>("/autosync/stop").then((r) => r.data),
-
-  status: () =>
-    api.get<AutoSyncStatus>("/autosync/status").then((r) => r.data),
-};
 
 export interface GoCacheEvent {
   id: string; host: string; domain: string; ip: string; method: string;
@@ -246,6 +125,13 @@ export interface GoCacheOverview {
   recentWaf:      GoCacheEvent[];
   recentFirewall: GoCacheEvent[];
   recentBot:      GoCacheEvent[];
+  totals?: { waf: number; firewall: number; bot: number; botSim: number };
+  timeline?: { hour: string; waf: number; bot: number; firewall: number }[];
+  byCountry?: { country: string; count: number }[];
+  attackCategories?: { category: string; count: number }[];
+  botTypes?: { type: string; count: number }[];
+  userAgentTools?: { tool: string; count: number }[];
+  byMethod?: { method: string; count: number }[];
 }
 
 export interface DatadogMetrics {
@@ -256,15 +142,28 @@ export interface DatadogMetrics {
     errors:      { host: string; notFound: number }[];
   };
   sql: {
-    blocked:    { host: string; blocked: number }[];
-    fullScans:  { host: string; fullScans: number }[];
+    blocked:        { host: string; blocked: number }[];
+    fullScans:      { host: string; fullScans: number }[];
+    ple:            { host: string; ple: number }[];
+    userConnections:{ host: string; connections: number }[];
+    batchRequests:  { host: string; batchPerSec: number }[];
   };
+}
+
+export interface DatadogInfra {
+  cpu:          { host: string; cpu: number }[];
+  memory:       { host: string; memUsedGb: number }[];
+  disk:         { host: string; diskPct: number }[];
+  network:      { host: string; mbps: number }[];
+  podRestarts:  { deployment: string; restarts: number }[];
+  containerCpu: { container: string; cpu: number }[];
 }
 
 export interface DatadogOverview {
   monitors: {
     total: number;
     stateCounts: Record<string, number>;
+    byType: Record<string, number>;
     alerting: { id: number; name: string; state: string; type: string; query: string }[];
     licenseAlerts: { name: string; state: string }[];
   };
@@ -277,16 +176,80 @@ export interface DatadogOverview {
     total: number;
     list: { name: string; apps: string[]; lastReported: number }[];
   };
+  slos?: { id: string; name: string; type: string; thresholds: { timeframe: string; target: number; target_display: string }[] }[];
+  downtimes?: { id: number; monitor_id: number | null; message: string; active: boolean; start: number; end: number | null; scope: string }[];
+  incidents?: { public_id: number; title: string; resolved: string | null; customer_impact_scope: string; created: string }[];
 }
+
+export interface PessoaStats {
+  user_id: string;
+  nm_pessoa: string | null;
+  total: number;
+  errors: number;
+  empty_guid: number;
+}
+
+export const eventsApi = {
+  list: (filters: EventFilters = {}) =>
+    api.get<EventsResponse>("/events", { params: filters }).then((r) => r.data),
+
+  get: (id: string) => api.get<DbEvent>(`/events/${id}`).then((r) => r.data),
+
+  stats: () => api.get<StatsSummary>("/events/stats/summary").then((r) => r.data),
+
+  timeline: (hours?: number) =>
+    api.get<TimelineEntry[]>("/events/stats/timeline", { params: { hours } }).then((r) => r.data),
+
+  emptyGuidTimeline: () =>
+    api.get<{ hour: string; count: string; unique_users: string }[]>(
+      "/events/stats/empty-guid-timeline"
+    ).then((r) => r.data),
+
+  authErrorStats: () => api.get<AuthErrorStats>("/events/stats/auth-errors").then((r) => r.data),
+
+  securityStats: () => api.get<SecurityStats>("/events/stats/security").then((r) => r.data),
+
+  kongAuthStats: () => api.get<KongAuthStats>("/events/stats/kong-auth").then((r) => r.data),
+
+  datadogOverview: () => api.get<DatadogOverview>("/datadog/overview").then((r) => r.data),
+
+  gocacheOverview: () => api.get<GoCacheOverview>("/gocache/overview").then((r) => r.data),
+
+  datadogMetrics: () => api.get<DatadogMetrics>("/datadog/metrics").then((r) => r.data),
+
+  datadogInfra: () => api.get<DatadogInfra>("/datadog/infra").then((r) => r.data),
+};
+
+export type RiskLevel = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";
+
+export interface CorrelatedThreat {
+  rule: string;
+  title: string;
+  description: string;
+  risk: RiskLevel;
+  evidence: string[];
+  indicators: string[];
+}
+
+export interface ThreatReport {
+  generatedAt: string;
+  riskLevel: RiskLevel;
+  findings: CorrelatedThreat[];
+  narrative: string;
+  sources: {
+    seq:     { ok: boolean; events: number };
+    datadog: { ok: boolean; alerts: number };
+    gocache: { ok: boolean; blocked: number };
+  };
+}
+
+export const reportApi = {
+  threatReport: () => api.get<ThreatReport>("/report/threat").then((r) => r.data),
+};
 
 export const pessoaApi = {
   lookup: (userIds: string[]): Promise<Record<string, string>> =>
-    api
-      .get<Record<string, string>>("/pessoa/lookup", {
-        params: { userIds: userIds.join(",") },
-      })
-      .then((r) => r.data),
-
-  stats: () =>
-    api.get<PessoaStats[]>("/pessoa/stats").then((r) => r.data),
+    api.get<Record<string, string>>("/pessoa/lookup", {
+      params: { userIds: userIds.join(",") },
+    }).then((r) => r.data),
 };

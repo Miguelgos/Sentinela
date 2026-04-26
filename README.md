@@ -4,14 +4,15 @@ Dashboard web de inteligência de logs e segurança para o serviço `salesbo` da
 
 ## Contexto
 
-O **Sentinela** monitora em tempo real os eventos do serviço `salesbo` (Sales Backoffice) publicados no Seq em `https://seq-prd.ituran.sp`. Consome esses eventos, persiste localmente em PostgreSQL e fornece análises focadas nos seguintes padrões:
+O **Sentinela** monitora em tempo real os eventos do serviço `salesbo` (Sales Backoffice) publicados no Seq em `https://seq-prd.ituran.sp`. Consome esses eventos via polling contínuo, persiste localmente em SQLite e mantém uma store in-memory para consultas rápidas. As análises cobrem os seguintes padrões:
 
 1. **GUID de Cotação vazio** — endpoint `Quote/PrintItens` chamado com `GUID_COTACAO: 00000000-0000-0000-0000-000000000000`
 2. **Falhas de autenticação** — endpoint `/connect/token` com fluxo ResourceOwner retornando `Unauthorized`
 3. **Kong Auth Request com falhas** — requisições via Kong com `StatusCode != 200`
 4. **Análise de Segurança** — findings de segurança com severidade (Critical/High/Medium/Low)
-5. **Datadog** — monitores, logs, hosts, métricas IIS e SQL Server
-6. **GoCache WAF** — eventos WAF, firewall, bot mitigation nas últimas 24h
+5. **Datadog** — monitores, logs, hosts, SLOs, downtimes, incidentes, métricas IIS, SQL Server e infra
+6. **GoCache WAF** — eventos WAF, firewall, bot mitigation, categorias de ataque, países, ferramentas ofensivas
+7. **Relatório de Ameaças** — 12 regras de correlação cruzada (Seq + Datadog + GoCache) + narrativa executiva Gemini 2.0 Flash
 
 ## Stack
 
@@ -19,12 +20,14 @@ O **Sentinela** monitora em tempo real os eventos do serviço `salesbo` (Sales B
 |--------|-----------|
 | Frontend | React 18 + TypeScript + Vite + Tailwind CSS + shadcn/ui |
 | Backend | Node.js + Express + TypeScript |
-| Banco principal | PostgreSQL 16 (Docker) |
+| Banco principal | SQLite (`better-sqlite3`, arquivo `data/events.db`) |
+| Store in-memory | Map em `accumulator.ts` para consultas rápidas |
 | Banco auxiliar | SQL Server (`ituranweb` — lookup de nomes de pessoa) |
 | Gráficos | Recharts |
 | PDF export | jsPDF + jspdf-autotable |
 | HTTP (interno) | `https` nativo do Node (TLS sem verificação de certificado) |
 | Monitoramento externo | Datadog (us5.datadoghq.com) + GoCache WAF API |
+| IA generativa | Gemini 2.0 Flash (narrativa do Relatório de Ameaças) |
 
 ## Estrutura
 
@@ -33,101 +36,113 @@ seq-analyzer/
 ├── backend/
 │   ├── src/
 │   │   ├── db/
-│   │   │   ├── index.ts        # Pool pg
-│   │   │   ├── mssql.ts        # Conexão SQL Server
-│   │   │   └── schema.sql      # DDL inicial
+│   │   │   ├── sqlite.ts        # better-sqlite3 (tier A/B retention)
+│   │   │   └── mssql.ts         # SQL Server lookup
+│   │   ├── lib/
+│   │   │   ├── ddClient.ts      # Datadog HTTP client
+│   │   │   ├── gcClient.ts      # GoCache HTTP client
+│   │   │   └── geminiClient.ts  # Gemini 2.0 Flash client
 │   │   ├── routes/
-│   │   │   ├── events.ts       # CRUD + estatísticas (inclui /stats/security e /stats/kong-auth)
-│   │   │   ├── sync.ts         # Sync manual
-│   │   │   ├── autosync.ts     # Controle de auto-sync (rota)
-│   │   │   ├── pessoa.ts       # Lookup de nomes
-│   │   │   ├── datadog.ts      # Integração Datadog (monitors, logs, hosts, métricas IIS/SQL)
-│   │   │   └── gocache.ts      # Integração GoCache WAF (WAF, firewall, bot)
-│   │   ├── autosync.ts         # Módulo de auto-sync incremental com retenção
-│   │   ├── sync-core.ts        # Funções compartilhadas de sync + deleteOldEvents
-│   │   ├── types.ts            # Parsers e tipos
-│   │   └── index.ts            # Entry point + bootstrap
+│   │   │   ├── events.ts        # Seq events CRUD + stats
+│   │   │   ├── pessoa.ts        # Nome lookup
+│   │   │   ├── datadog.ts       # Datadog overview + metrics + infra
+│   │   │   ├── gocache.ts       # GoCache WAF + bot + firewall
+│   │   │   └── report.ts        # Relatório de Ameaças (12 regras + Gemini)
+│   │   ├── accumulator.ts       # Seq polling + in-memory store + SQLite write-through
+│   │   ├── seq.ts               # Seq HTTP client
+│   │   ├── types.ts             # Event parsers
+│   │   └── index.ts             # Express entry point
 ├── frontend/
+│   ├── public/
+│   │   └── sentinela_v1_radar_pulso.svg   # Logo Sentinela (800x320)
 │   ├── src/
 │   │   ├── components/
-│   │   │   ├── ui/                    # Primitivos shadcn/ui
-│   │   │   ├── SentinelaLogo.tsx      # Ícone SVG da marca (sidebar)
-│   │   │   ├── Dashboard.tsx          # Dashboard principal
-│   │   │   ├── LogsTable.tsx          # Tabela de eventos
-│   │   │   ├── ErrorAnalysis.tsx      # Análise GUID vazio
-│   │   │   ├── AuthErrorAnalysis.tsx  # Análise auth failures
-│   │   │   ├── KongAuthAnalysis.tsx   # Análise Kong Auth (StatusCode != 200)
-│   │   │   ├── SecurityAnalysis.tsx   # Análise de segurança (findings)
-│   │   │   ├── DatadogAnalysis.tsx    # Datadog — monitores, logs, hosts, IIS, SQL
-│   │   │   ├── GoCacheAnalysis.tsx    # GoCache WAF — WAF, firewall, bot mitigation
-│   │   │   ├── SyncConfig.tsx         # Configuração de sync
-│   │   │   └── EventDetail.tsx        # Modal de detalhe de evento
+│   │   │   ├── ui/
+│   │   │   ├── SentinelaLogo.tsx
+│   │   │   ├── Dashboard.tsx
+│   │   │   ├── LogsTable.tsx
+│   │   │   ├── ErrorAnalysis.tsx
+│   │   │   ├── AuthErrorAnalysis.tsx
+│   │   │   ├── KongAuthAnalysis.tsx
+│   │   │   ├── SecurityAnalysis.tsx
+│   │   │   ├── DatadogAnalysis.tsx
+│   │   │   ├── GoCacheAnalysis.tsx
+│   │   │   ├── ReportAnalysis.tsx         # Relatório de Ameaças
+│   │   │   ├── SyncConfig.tsx
+│   │   │   └── EventDetail.tsx
 │   │   ├── lib/
-│   │   │   ├── api.ts          # Axios + todos os tipos de resposta
-│   │   │   ├── exportPdf.ts    # Exportação PDF com logo Sentinela (todas as páginas)
+│   │   │   ├── api.ts
+│   │   │   ├── exportPdf.ts      # PDF export com SVG logo rasterizado via Canvas
 │   │   │   └── utils.ts
 │   │   └── App.tsx
 ├── docs/
-│   ├── spec.md                 # Especificação funcional
-│   ├── logo.svg                # Logo horizontal Sentinela (320×100)
-│   ├── logo-icon.svg           # Ícone quadrado Sentinela (64×64)
-│   └── adr/                   # Architecture Decision Records
-└── docker-compose.yml
+│   ├── spec.md
+│   ├── logo.svg
+│   ├── logo-icon.svg
+│   └── adr/
+└── docker-compose.yml             # legado — não necessário para o banco de dados
 ```
 
 ## Pré-requisitos
 
-- Docker + Docker Compose
 - Node.js 20+
 - Acesso à rede interna da Ituran (para o Seq e o SQL Server)
+
+> Não é necessário Docker para o banco de dados. O SQLite é um arquivo local em `data/events.db`.
 
 ## Como rodar
 
 ```bash
-# 1. Banco de dados
-docker compose up -d
-
-# 2. Backend
+# Backend
 cd backend
 npm install
-npm run dev          # porta 3001
+npm run dev   # porta 3001
 
-# 3. Frontend
+# Frontend
 cd frontend
 npm install
-npm run dev          # porta 5173 (proxy /api → :3001)
+npm run dev   # porta 5173 (proxy /api -> :3001)
 ```
 
-## Variáveis de ambiente (backend)
+## Variáveis de ambiente (backend `.env`)
 
 ```env
-DATABASE_URL=postgresql://seq_user:seq_pass@localhost:5434/seq_logs
 PORT=3001
+SEQ_URL=https://seq-prd.ituran.sp
+SEQ_SIGNAL=signal-m33301
+SQLITE_PATH=./data/events.db
 DD_API_KEY=<datadog-api-key>
 DD_APP_KEY=<datadog-application-key>
 DD_SITE=us5.datadoghq.com
 GC_TOKEN=<gocache-token>
+MSSQL_SERVER=<server>
+MSSQL_DATABASE=ituranweb
+MSSQL_USER=<user>
+MSSQL_PASSWORD=<password>
+GEMINI_API_KEY=<gemini-key>
 ```
 
-> As variáveis `DD_*` e `GC_TOKEN` são lidas no boot do processo — reiniciar o backend após alterar o `.env`.
+> Todas as variáveis são lidas no boot do processo — reiniciar o backend após alterar o `.env`.
 
-## API resumida
+## API
 
 ### Seq / Eventos
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
 | GET | `/api/events` | Listar eventos com filtros |
+| GET | `/api/events/:id` | Detalhe de um evento |
 | GET | `/api/events/stats/summary` | Totais, top erros, top usuários (últimas 4h) |
 | GET | `/api/events/stats/timeline` | Timeline por hora/nível |
 | GET | `/api/events/stats/empty-guid-timeline` | Timeline de GUID vazio (últimas 4h) |
 | GET | `/api/events/stats/auth-errors` | Estatísticas de auth failures (últimas 4h) |
 | GET | `/api/events/stats/security` | Findings de segurança (últimas 4h) |
 | GET | `/api/events/stats/kong-auth` | Análise Kong Auth — StatusCode != 200 (últimas 4h) |
-| POST | `/api/sync` | Sync manual com o Seq |
-| POST | `/api/autosync/start` | Iniciar auto-sync (60s) |
-| POST | `/api/autosync/stop` | Parar auto-sync |
-| GET | `/api/autosync/status` | Status do auto-sync |
+
+### Pessoa
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
 | GET | `/api/pessoa/lookup` | Lookup de nomes por user_id |
 | GET | `/api/pessoa/stats` | Estatísticas por pessoa |
 
@@ -135,27 +150,52 @@ GC_TOKEN=<gocache-token>
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| GET | `/api/datadog/overview` | Monitores, logs (4h) e hosts |
-| GET | `/api/datadog/metrics` | Métricas IIS e SQL Server (última hora via `/api/v1/query`) |
+| GET | `/api/datadog/overview` | Monitores, logs, hosts, SLOs, downtimes ativos e incidentes ativos |
+| GET | `/api/datadog/metrics` | Métricas IIS e SQL Server (última hora) |
+| GET | `/api/datadog/infra` | CPU, memória, disco, rede, restarts de pods K8s, CPU de containers |
 
 ### GoCache WAF
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| GET | `/api/gocache/overview` | Resumo WAF/firewall/bot, top IPs/alertas/URIs, eventos recentes (24h) |
+| GET | `/api/gocache/overview` | WAF + bot + firewall + categorias de ataque + países + timeline + ferramentas |
 
-## Performance
+### Relatório de Ameaças
 
-- **Janela de queries**: todas as rotas de estatísticas consultam apenas as **últimas 4 horas** (`STATS_WINDOW`)
-- **Retenção de dados**: o auto-sync deleta eventos com mais de **6 horas** após cada ciclo (`deleteOldEvents`)
-- **Sync incremental**: o auto-sync rastreia `newestEventId` e pára a paginação ao atingir o evento já visto — evita re-download completo a cada ciclo
-- **Primeira execução**: limitada a eventos das últimas 6h via parâmetro `fromDateUtc` do Seq
-- **Índice trigram**: `CREATE INDEX CONCURRENTLY ON seq_events USING GIN (message gin_trgm_ops)` para acelerar buscas `ILIKE`
-- **PostgreSQL**: `max_parallel_workers_per_gather = 0` e `max_parallel_workers = 0` para evitar esgotamento de memória compartilhada em WSL
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| GET | `/api/report/threat` | 12 regras de correlação cruzada + narrativa Gemini 2.0 Flash |
+
+### Health
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| GET | `/api/health` | Status do serviço |
+
+## Regras de correlação do Relatório de Ameaças
+
+O endpoint `/api/report/threat` cruza dados de Seq, Datadog e GoCache com 12 regras:
+
+| Regra | Descrição |
+|-------|-----------|
+| `BRUTE_FORCE` | Tentativas de brute force detectadas nos logs de autenticação |
+| `ANOMALOUS_USERNAMES` | Usernames em formato anômalo (ex.: CNPJ como login) |
+| `WAF_INJECTION` | Ataques de injeção bloqueados pelo WAF (SQLi, XSS) |
+| `MULTI_SOURCE_IP` | Mesmo usuário acessando de múltiplos IPs simultâneos |
+| `EXPIRED_CERTS` | Certificados SSL/TLS expirados em uso em produção |
+| `DATADOG_ALERT` | Monitores Datadog em estado Alert ou Warn |
+| `HIGH_ERROR_RATE` | Taxa de erros acima do limiar esperado |
+| `ACTIVE_INCIDENT` | Incidentes ativos registrados no Datadog |
+| `SCANNER_DETECTED` | Scanners de vulnerabilidade detectados (Nikto, SQLMap, etc.) |
+| `BOT_ATTACK` | Bots maliciosos bloqueados pelo GoCache |
+| `INFRA_STRESS` | CPU, memória ou disco de hosts em nível crítico |
+| `GEO_CONCENTRATION` | Concentração anômala de ataques em um único país |
+
+A narrativa executiva é gerada pelo Gemini 2.0 Flash com ~400 palavras em 4 seções estruturadas. Em caso de indisponibilidade da API, um resumo estático é retornado como fallback.
 
 ## Exportação PDF
 
-Todas as páginas de análise têm botão **Exportar PDF** no canto superior direito. Os PDFs incluem o logo Sentinela no cabeçalho.
+Todas as páginas de análise têm botão **Exportar PDF** no canto superior direito. O logo SVG (`sentinela_v1_radar_pulso.svg`) é rasterizado via Canvas API no carregamento do módulo e embutido como PNG em todos os cabeçalhos de PDF.
 
 | Página | Função exportada |
 |--------|----------------|
@@ -164,44 +204,47 @@ Todas as páginas de análise têm botão **Exportar PDF** no canto superior dir
 | Falhas de Autenticação | `exportAuthErrorPdf` |
 | Kong Auth | `exportKongAuthPdf` |
 | Segurança | `exportSecurityPdf` |
-
-Os PDFs usam fonte Helvetica (CP1252) — evitar emoji e símbolos Unicode fora do Latin-1 nos títulos.
+| Relatório de Ameaças | `exportThreatReportPdf` |
 
 ## Integrações externas
 
-### Datadog (`us5.datadoghq.com`)
+### Seq (`https://seq-prd.ituran.sp`)
+
+- TLS com certificado autoassinado — verificação desabilitada intencionalmente (`rejectUnauthorized: false`)
+- Autenticação desabilitada — endpoint público sem credenciais
+- Filtro por signal: `signal-m33301` (apenas erros)
+- Polling contínuo via `accumulator.ts`; eventos persistidos em SQLite com tiered retention
+
+### Datadog (`api.us5.datadoghq.com`)
 
 Autenticação via headers `DD-API-KEY` e `DD-APPLICATION-KEY`. Endpoints usados:
 
 - `GET /api/v1/monitor` — estado dos monitores
 - `GET /api/v2/logs/events` — volume de logs por serviço (últimas 4h)
 - `GET /api/v1/hosts` — lista de hosts ativos
-- `GET /api/v1/query` — métricas de série temporal:
-  - `iis.net.num_connections{*}by{host}` — conexões ativas IIS
-  - `iis.httpd_request_method.{get,post}{*}by{site}` — requisições por site
-  - `iis.net.bytes_total{*}by{host}` — throughput por host
-  - `iis.errors.not_found{*}by{host}` — taxa de 404
-  - `sqlserver.activity.blocked_connections{*}by{host}` — conexões bloqueadas
-  - `sqlserver.access.full_scans{*}by{host}` — full table scans/s
+- `GET /api/v1/slo` — SLOs e limiares
+- `GET /api/v1/downtime` — downtimes ativos
+- `GET /api/v2/incidents` — incidentes ativos
+- `GET /api/v1/query` — métricas de série temporal (IIS, SQL Server, infra)
 
-> TLS com `rejectUnauthorized: false` — certificado Datadog não é verificável no WSL.
+### GoCache (`api.gocache.com.br`)
 
-### GoCache WAF
+Autenticação via header `GoCache-Token: <token>`. Consultas às últimas 24h com paginação (até 500 eventos WAF, 300 bot via parâmetro `page`):
 
-Autenticação via header `GoCache-Token: <token>`. Consultas às últimas 24h:
+- Eventos WAF bloqueados com classificação de categoria: SQLi, XSS, PathTraversal, Scanner, Protocol, Other
+- Eventos Firewall bloqueados
+- Bots bloqueados e em modo monitor
+- Detecção de ferramentas ofensivas: SQLMap, Nikto, Dart, Python, curl, Go, Java, Headless
 
-- Eventos WAF bloqueados (`type=waf`, `action=block`)
-- Eventos Firewall bloqueados (`type=firewall`, `action=block`)
-- Bots bloqueados (`type=bot-mitigation`, `action=block`)
-- Bots em modo monitor (`type=bot-mitigation`, `action=simulate`)
+### Gemini (`generativelanguage.googleapis.com`)
 
-Limite da API: 100 eventos por requisição.
+- Model: `gemini-2.0-flash`
+- Endpoint: `POST /v1beta/models/gemini-2.0-flash:generateContent`
+- Autenticação: query param `key=GEMINI_API_KEY`
+- Usado exclusivamente para a narrativa executiva do Relatório de Ameaças
+- Fallback automático para resumo estático se API indisponível
 
-## Notas importantes
+### SQL Server (`ituranweb`)
 
-- O Seq usa TLS com certificado autoassinado; a verificação é desabilitada intencionalmente (`rejectUnauthorized: false`)
-- A autenticação no Seq está desabilitada — o endpoint `/api/events/` funciona sem credenciais
-- O auto-sync corre a cada 60s com sync incremental — apenas novos eventos são baixados após a primeira execução
-- O `user_id` nos eventos do `salesbo` é um `cd_pessoa` numérico que mapeia para `pessoa.nm_pessoa` no banco `ituranweb`
-- Propriedades JSONB do Kong (StatusCode, Username, ClientIp, Path) são extraídas via subquery `jsonb_array_elements` no CTE
-- As métricas Datadog disponíveis neste ambiente são de infraestrutura Windows (IIS, SQL Server) — não há métricas `system.cpu.*` (agente sem acesso a métricas de host)
+- Driver `mssql`
+- Lookup de `nm_pessoa` por `cd_pessoa` (campo `user_id` dos eventos do salesbo)

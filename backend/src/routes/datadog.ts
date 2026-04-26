@@ -1,52 +1,29 @@
 import { Router } from "express";
-import https from "https";
+import { ddFetch } from "../lib/ddClient";
 
 const router = Router();
 
-const DD_SITE = process.env.DD_SITE || "us5.datadoghq.com";
-const DD_API_KEY = process.env.DD_API_KEY || "";
-const DD_APP_KEY = process.env.DD_APP_KEY || "";
-
-function ddFetch(path: string, method = "GET", body?: unknown): Promise<unknown> {
-  return new Promise((resolve, reject) => {
-    const payload = body ? JSON.stringify(body) : undefined;
-    const options: https.RequestOptions = {
-      hostname: `api.${DD_SITE}`,
-      path,
-      method,
-      rejectUnauthorized: false,
-      headers: {
-        "DD-API-KEY": DD_API_KEY,
-        "DD-APPLICATION-KEY": DD_APP_KEY,
-        "Content-Type": "application/json",
-        ...(payload ? { "Content-Length": Buffer.byteLength(payload) } : {}),
-      },
-      timeout: 12000,
-    };
-    const req = https.request(options, (res) => {
-      let data = "";
-      res.on("data", (chunk) => { data += chunk; });
-      res.on("end", () => {
-        try { resolve(JSON.parse(data)); }
-        catch { reject(new Error(`Invalid JSON: ${data.slice(0, 200)}`)); }
-      });
-    });
-    req.on("error", reject);
-    req.on("timeout", () => { req.destroy(); reject(new Error("Datadog request timeout")); });
-    if (payload) req.write(payload);
-    req.end();
-  });
+function extract(raw: unknown) {
+  const series = ((raw as Record<string, unknown>)?.series ?? []) as Record<string, unknown>[];
+  return series.map((s) => {
+    const pts = (s.pointlist ?? []) as [number, number | null][];
+    const last = [...pts].reverse().find((p) => p[1] !== null);
+    return { scope: String(s.scope ?? ""), value: last ? Math.round(last[1]! * 100) / 100 : 0 };
+  }).sort((a, b) => b.value - a.value);
 }
 
 // GET /api/datadog/overview
 router.get("/overview", async (_req, res) => {
   try {
-    const [monitorsRaw, logsRaw, hostsRaw] = await Promise.all([
+    const [monitorsRaw, logsRaw, hostsRaw, slosRaw, downtimesRaw, incidentsRaw] = await Promise.all([
       ddFetch("/api/v1/monitor?with_downtimes=false&page=0&page_size=100"),
       ddFetch(
         "/api/v2/logs/events?filter%5Bquery%5D=%2A&filter%5Bfrom%5D=now-4h&filter%5Bto%5D=now&page%5Blimit%5D=1000",
       ),
       ddFetch("/api/v1/hosts?count=100&start=0"),
+      ddFetch("/api/v1/slo?limit=50"),
+      ddFetch("/api/v1/downtime?current_only=true"),
+      ddFetch("/api/v2/incidents?page[size]=20"),
     ]);
 
     // ── Monitors ──────────────────────────────────────────────────────────
@@ -70,6 +47,13 @@ router.get("/overview", async (_req, res) => {
           query: String((m.query as string || "").slice(0, 120)),
         });
       }
+    }
+
+    // Monitor type breakdown
+    const byType: Record<string, number> = {};
+    for (const m of noLicense) {
+      const t = String(m.type ?? "unknown");
+      byType[t] = (byType[t] ?? 0) + 1;
     }
 
     // License alerts separately
@@ -109,10 +93,20 @@ router.get("/overview", async (_req, res) => {
       lastReported: Number(h.last_reported_time ?? 0),
     }));
 
+    // ── SLOs ──────────────────────────────────────────────────────────────
+    const sloList = ((slosRaw as Record<string, unknown>)?.data ?? []) as Record<string, unknown>[];
+
+    // ── Downtimes ─────────────────────────────────────────────────────────
+    const downtimeList = Array.isArray(downtimesRaw) ? downtimesRaw as Record<string, unknown>[] : [];
+
+    // ── Incidents ─────────────────────────────────────────────────────────
+    const incidentList = ((incidentsRaw as Record<string, unknown>)?.data ?? []) as Record<string, unknown>[];
+
     res.json({
       monitors: {
         total: monitors.length,
         stateCounts,
+        byType,
         alerting,
         licenseAlerts,
       },
@@ -125,6 +119,31 @@ router.get("/overview", async (_req, res) => {
         total: totalHosts,
         list: hosts,
       },
+      slos: sloList.map(s => ({
+        id: String(s.id),
+        name: String(s.name),
+        type: String(s.type),
+        thresholds: (s.thresholds as {timeframe:string;target:number;target_display:string}[] || []),
+      })),
+      downtimes: (downtimeList as Record<string,unknown>[]).map(d => ({
+        id: Number(d.id),
+        monitor_id: d.monitor_id != null ? Number(d.monitor_id) : null,
+        message: String(d.message || ""),
+        active: Boolean(d.active),
+        start: Number(d.start),
+        end: d.end != null ? Number(d.end) : null,
+        scope: String(d.scope || ""),
+      })),
+      incidents: (incidentList as Record<string,unknown>[]).map((i) => {
+        const attrs = (i.attributes as Record<string,unknown>) || {};
+        return {
+          public_id: Number(attrs.public_id),
+          title: String(attrs.title || ""),
+          resolved: attrs.resolved != null ? String(attrs.resolved) : null,
+          customer_impact_scope: String(attrs.customer_impact_scope || ""),
+          created: String(attrs.created || ""),
+        };
+      }).filter(i => i.resolved === null),
     });
   } catch (err) {
     console.error("[datadog] overview error:", err);
@@ -141,7 +160,8 @@ router.get("/metrics", async (_req, res) => {
     const q = (query: string) =>
       ddFetch(`/api/v1/query?from=${from}&to=${now}&query=${encodeURIComponent(query)}`);
 
-    const [connRaw, getReqRaw, postReqRaw, bytesRaw, errorsRaw, blockedRaw, fullScansRaw] =
+    const [connRaw, getReqRaw, postReqRaw, bytesRaw, errorsRaw,
+           blockedRaw, fullScansRaw, pleRaw, userConnRaw, batchReqRaw] =
       await Promise.all([
         q("sum:iis.net.num_connections{*}by{host}"),
         q("sum:iis.httpd_request_method.get{*}by{site}"),
@@ -150,16 +170,10 @@ router.get("/metrics", async (_req, res) => {
         q("sum:iis.errors.not_found{*}by{host}"),
         q("avg:sqlserver.activity.blocked_connections{*}by{host}"),
         q("avg:sqlserver.access.full_scans{*}by{host}"),
+        q("avg:sqlserver.performance.page_life_expectancy{*}by{host}"),
+        q("avg:sqlserver.activity.user_connections{*}by{host}"),
+        q("avg:sqlserver.performance.batch_requests_sec{*}by{host}"),
       ]);
-
-    function extract(raw: unknown) {
-      const series = ((raw as Record<string, unknown>)?.series ?? []) as Record<string, unknown>[];
-      return series.map((s) => {
-        const pts = (s.pointlist ?? []) as [number, number | null][];
-        const last = [...pts].reverse().find((p) => p[1] !== null);
-        return { scope: String(s.scope ?? ""), value: last ? Math.round(last[1]! * 100) / 100 : 0 };
-      }).sort((a, b) => b.value - a.value);
-    }
 
     const iisConnections = extract(connRaw).map((s) => ({
       host: s.scope.replace("host:", ""),
@@ -179,15 +193,59 @@ router.get("/metrics", async (_req, res) => {
     const iisBytes  = extract(bytesRaw).map((s) => ({ host: s.scope.replace("host:", ""), bytes: s.value }));
     const iisErrors = extract(errorsRaw).map((s) => ({ host: s.scope.replace("host:", ""), notFound: s.value }));
 
-    const sqlBlocked   = extract(blockedRaw).map((s)   => ({ host: s.scope.replace("host:", ""), blocked: s.value }));
-    const sqlFullScans = extract(fullScansRaw).map((s) => ({ host: s.scope.replace("host:", ""), fullScans: s.value }));
+    const sqlBlocked     = extract(blockedRaw).map((s)   => ({ host: s.scope.replace("host:", ""), blocked: s.value }));
+    const sqlFullScans   = extract(fullScansRaw).map((s) => ({ host: s.scope.replace("host:", ""), fullScans: s.value }));
+    const sqlPle         = extract(pleRaw).map((s)       => ({ host: s.scope.replace("host:", ""), ple: s.value }));
+    const sqlUserConns   = extract(userConnRaw).map((s)  => ({ host: s.scope.replace("host:", ""), connections: s.value }));
+    const sqlBatchReqs   = extract(batchReqRaw).map((s)  => ({ host: s.scope.replace("host:", ""), batchPerSec: s.value }));
 
     res.json({
       iis: { connections: iisConnections, bySite: iisBySite, bytes: iisBytes, errors: iisErrors },
-      sql: { blocked: sqlBlocked, fullScans: sqlFullScans },
+      sql: { blocked: sqlBlocked, fullScans: sqlFullScans, ple: sqlPle, userConnections: sqlUserConns, batchRequests: sqlBatchReqs },
     });
   } catch (err) {
     console.error("[datadog] metrics error:", err);
+    res.status(502).json({ error: String(err) });
+  }
+});
+
+// GET /api/datadog/infra — host & container infrastructure metrics (last hour)
+router.get("/infra", async (_req, res) => {
+  try {
+    const now = Math.floor(Date.now() / 1000);
+    const from = now - 3600;
+
+    const q = (query: string) =>
+      ddFetch(`/api/v1/query?from=${from}&to=${now}&query=${encodeURIComponent(query)}`);
+
+    const [cpuRaw, memRaw, diskRaw, netRaw, podRaw, ctnRaw] = await Promise.all([
+      q("avg:system.cpu.user{*}by{host}"),
+      q("avg:system.mem.used{*}by{host}"),
+      q("avg:system.disk.in_use{*}by{host}"),
+      q("sum:system.net.bytes_rcvd{*}by{host}"),
+      q("sum:kubernetes.containers.restarts{*}by{kube_deployment}"),
+      q("avg:container.cpu.usage{*}by{container_name}"),
+    ]);
+
+    const cpuSeries  = extract(cpuRaw);
+    const memSeries  = extract(memRaw);
+    const diskSeries = extract(diskRaw);
+    const netSeries  = extract(netRaw);
+    const podSeries  = extract(podRaw);
+    const ctnSeries  = extract(ctnRaw);
+
+    res.json({
+      cpu:           cpuSeries.map(s  => ({ host: s.scope.replace("host:", ""),             cpu:       Math.round(s.value * 10)/10 })),
+      memory:        memSeries.map(s  => ({ host: s.scope.replace("host:", ""),             memUsedGb: Math.round(s.value / 1073741824 * 10)/10 })),
+      disk:          diskSeries.map(s => ({ host: s.scope.replace("host:", ""),             diskPct:   Math.round(s.value * 10)/10 })),
+      network:       netSeries.map(s  => ({ host: s.scope.replace("host:", ""),             mbps:      Math.round(s.value / 125000 * 10)/10 })),
+      podRestarts:   podSeries.filter(s => s.value > 0)
+                               .map(s  => ({ deployment: s.scope.replace("kube_deployment:", ""), restarts: Math.round(s.value) }))
+                               .sort((a, b) => b.restarts - a.restarts),
+      containerCpu:  ctnSeries.slice(0, 15).map(s => ({ container: s.scope.replace("container_name:", ""), cpu: Math.round(s.value * 10)/10 })),
+    });
+  } catch (err) {
+    console.error("[datadog] infra error:", err);
     res.status(502).json({ error: String(err) });
   }
 });

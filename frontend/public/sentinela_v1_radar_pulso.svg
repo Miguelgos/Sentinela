@@ -1,0 +1,36 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 320" font-family="Arial Black, Arial, sans-serif">
+  <defs>
+    <radialGradient id="bg1" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0F2044"/>
+      <stop offset="100%" stop-color="#0A0A1A"/>
+    </radialGradient>
+    <linearGradient id="sweep1" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0077C2" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#00A651" stop-opacity="0.85"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="800" height="320" fill="url(#bg1)"/>
+
+  <!-- Radar -->
+  <g transform="translate(160,160)">
+    <!-- Concentric circles -->
+    <circle cx="0" cy="0" r="100" fill="none" stroke="#0077C2" stroke-width="2" opacity="0.35"/>
+    <circle cx="0" cy="0" r="72" fill="none" stroke="#0077C2" stroke-width="2" opacity="0.5"/>
+    <circle cx="0" cy="0" r="44" fill="none" stroke="#0077C2" stroke-width="2" opacity="0.7"/>
+    <!-- Crosshair -->
+    <line x1="-110" y1="0" x2="110" y2="0" stroke="#0077C2" stroke-width="1" opacity="0.4"/>
+    <line x1="0" y1="-110" x2="0" y2="110" stroke="#0077C2" stroke-width="1" opacity="0.4"/>
+    <!-- Sweep wedge -->
+    <path d="M 0 0 L 100 0 A 100 100 0 0 0 70.7 -70.7 Z" fill="url(#sweep1)" opacity="0.9"/>
+    <!-- Detected blip (green) -->
+    <circle cx="55" cy="-30" r="6" fill="#00A651"/>
+    <circle cx="55" cy="-30" r="12" fill="none" stroke="#00A651" stroke-width="1.5" opacity="0.6"/>
+    <!-- Center dot -->
+    <circle cx="0" cy="0" r="5" fill="#00A651"/>
+  </g>
+
+  <!-- Wordmark -->
+  <text x="320" y="170" fill="#FFFFFF" font-size="64" font-weight="900" letter-spacing="2">SENTINELA</text>
+  <text x="320" y="205" fill="#0077C2" font-size="16" font-weight="700" letter-spacing="6">SECURITY ANALYTICS</text>
+</svg>

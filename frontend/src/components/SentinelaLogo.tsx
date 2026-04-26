@@ -1,3 +1,14 @@
+export function SentinelaLogo({ className }: { className?: string }) {
+  return (
+    <img
+      src="/sentinela_v1_radar_pulso.svg"
+      alt="Sentinela"
+      className={className}
+      draggable={false}
+    />
+  );
+}
+
 export function SentinelaIcon({ size = 28 }: { size?: number }) {
   return (
     <svg

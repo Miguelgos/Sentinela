@@ -5,6 +5,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Shield, AlertTriangle, Bot, Globe, XCircle, Flame } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  LineChart, Line, CartesianGrid, Legend, Cell,
 } from "recharts";
 import { eventsApi, type GoCacheEvent, type GoCacheOverview } from "@/lib/api";
 import { format } from "date-fns";
@@ -107,8 +108,13 @@ export function GoCacheAnalysis() {
     );
   }
 
-  const { summary, topIPs, topAlerts, topURIs, topHosts, recentWaf, recentFirewall, recentBot } = data;
-  const totalBlocked = summary.wafBlocked + summary.firewallBlocked + summary.botBlocked;
+  const {
+    summary, topIPs, topAlerts, topURIs, topHosts, recentWaf, recentFirewall, recentBot,
+    totals, timeline, byCountry, attackCategories, botTypes, userAgentTools,
+  } = data;
+  const botBlockedDisplay   = totals ? totals.bot    : summary.botBlocked;
+  const botSimulateDisplay  = totals ? totals.botSim : summary.botSimulate;
+  const totalBlocked = summary.wafBlocked + summary.firewallBlocked + botBlockedDisplay;
 
   const alertChartData = topAlerts.slice(0, 8).map((a) => ({
     name: a.id.replace(/-/g, " ").slice(0, 28),
@@ -118,6 +124,32 @@ export function GoCacheAnalysis() {
   const uriChartData = topURIs.slice(0, 8).map((u) => ({
     name: u.uri.slice(-35),
     count: u.count,
+  }));
+
+  const timelineData = (timeline ?? []).map((t) => ({
+    hour: t.hour.slice(11, 16), // HH:MM
+    waf: t.waf,
+    bot: t.bot,
+    firewall: t.firewall,
+  }));
+
+  const categoryColors: Record<string, string> = {
+    "SQL Injection":   "#dc2626",
+    "XSS / Script":    "#ea580c",
+    "Path Traversal":  "#eab308",
+    "Scanner/Probe":   "#3b82f6",
+    "Protocol/Header": "#6b7280",
+    "Outros":          "#94a3b8",
+  };
+  const categoryChartData = (attackCategories ?? []).map((c) => ({
+    name: c.category,
+    count: c.count,
+    fill: categoryColors[c.category] ?? "#94a3b8",
+  }));
+
+  const countryChartData = (byCountry ?? []).slice(0, 10).map((c) => ({
+    name: c.country || "??",
+    count: c.count,
   }));
 
   return (
@@ -133,7 +165,7 @@ export function GoCacheAnalysis() {
               </p>
               <p className="text-xs text-muted-foreground mt-1">
                 <strong className="text-foreground">{totalBlocked.toLocaleString("pt-BR")}</strong> ataques bloqueados
-                e <strong className="text-foreground">{summary.botSimulate.toLocaleString("pt-BR")}</strong> bots detectados (modo monitor) nas últimas 24h
+                e <strong className="text-foreground">{botSimulateDisplay.toLocaleString("pt-BR")}</strong> bots detectados (modo monitor) nas últimas 24h
               </p>
             </div>
           </div>
@@ -167,7 +199,7 @@ export function GoCacheAnalysis() {
             <Bot className="h-6 w-6 text-purple-400 shrink-0" />
             <div>
               <p className="text-xs text-muted-foreground">Bots Bloqueados</p>
-              <p className="text-2xl font-bold text-purple-300">{summary.botBlocked.toLocaleString("pt-BR")}</p>
+              <p className="text-2xl font-bold text-purple-300">{botBlockedDisplay.toLocaleString("pt-BR")}</p>
               <p className="text-xs text-muted-foreground">Detectados como bot</p>
             </div>
           </CardContent>
@@ -177,7 +209,7 @@ export function GoCacheAnalysis() {
             <Bot className="h-6 w-6 text-yellow-400 shrink-0" />
             <div>
               <p className="text-xs text-muted-foreground">Bots (monitor)</p>
-              <p className="text-2xl font-bold text-yellow-300">{summary.botSimulate.toLocaleString("pt-BR")}</p>
+              <p className="text-2xl font-bold text-yellow-300">{botSimulateDisplay.toLocaleString("pt-BR")}</p>
               <p className="text-xs text-muted-foreground">Modo simulação</p>
             </div>
           </CardContent>
@@ -300,6 +332,158 @@ export function GoCacheAnalysis() {
             </div>
           </CardContent>
         </Card>
+      </div>
+
+      {/* Timeline (24h) — WAF / Bot / Firewall */}
+      {timelineData.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium flex items-center gap-2">
+              <Flame className="h-4 w-4 text-orange-400" />
+              Linha do Tempo — últimas 24h
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ResponsiveContainer width="100%" height={240}>
+              <LineChart data={timelineData}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                <XAxis dataKey="hour" tick={{ fontSize: 10 }} />
+                <YAxis tick={{ fontSize: 10 }} />
+                <Tooltip
+                  contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }}
+                />
+                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <Line type="monotone" dataKey="waf"      name="WAF"      stroke="#dc2626" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="bot"      name="Bot"      stroke="#a855f7" strokeWidth={2} dot={false} />
+                <Line type="monotone" dataKey="firewall" name="Firewall" stroke="#ea580c" strokeWidth={2} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Attack categories */}
+        {categoryChartData.length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Shield className="h-4 w-4 text-red-400" />
+                Categorias de Ataque (WAF)
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={categoryChartData} layout="vertical">
+                  <XAxis type="number" tick={{ fontSize: 9 }} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={130} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }}
+                  />
+                  <Bar dataKey="count" name="Eventos" radius={[0,3,3,0]}>
+                    {categoryChartData.map((entry, i) => (
+                      <Cell key={i} fill={entry.fill} />
+                    ))}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Country breakdown */}
+        {countryChartData.length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Globe className="h-4 w-4 text-blue-400" />
+                Países de Origem — Top 10
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <ResponsiveContainer width="100%" height={240}>
+                <BarChart data={countryChartData} layout="vertical">
+                  <XAxis type="number" tick={{ fontSize: 9 }} />
+                  <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={60} />
+                  <Tooltip
+                    contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }}
+                  />
+                  <Bar dataKey="count" fill="#3b82f6" name="Eventos" radius={[0,3,3,0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            </CardContent>
+          </Card>
+        )}
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        {/* Bot types table */}
+        {botTypes && botTypes.length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <Bot className="h-4 w-4 text-purple-400" />
+                Tipos de Bot Bloqueados
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto max-h-[280px]">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0">
+                    <tr className="border-b bg-muted/50">
+                      <th className="text-left p-2 text-muted-foreground">Tipo</th>
+                      <th className="text-right p-2 text-muted-foreground">Eventos</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {botTypes.map((b) => (
+                      <tr key={b.type} className="border-b hover:bg-muted/20">
+                        <td className="p-2 font-mono text-purple-300">{b.type}</td>
+                        <td className="p-2 text-right">
+                          <Badge variant="error">{b.count}</Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
+
+        {/* User-Agent tools table */}
+        {userAgentTools && userAgentTools.length > 0 && (
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium flex items-center gap-2">
+                <AlertTriangle className="h-4 w-4 text-amber-400" />
+                Ferramentas / User-Agent
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-x-auto max-h-[280px]">
+                <table className="w-full text-xs">
+                  <thead className="sticky top-0">
+                    <tr className="border-b bg-muted/50">
+                      <th className="text-left p-2 text-muted-foreground">Ferramenta</th>
+                      <th className="text-right p-2 text-muted-foreground">Eventos</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {userAgentTools.map((u) => (
+                      <tr key={u.tool} className="border-b hover:bg-muted/20">
+                        <td className="p-2 font-mono text-amber-300">{u.tool}</td>
+                        <td className="p-2 text-right">
+                          <Badge variant="error">{u.count}</Badge>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        )}
       </div>
 
       {/* Event tables */}

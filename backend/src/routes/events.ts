@@ -1,681 +1,526 @@
 import { Router, Request, Response } from "express";
-import { query } from "../db";
-import { EventFilters, EMPTY_GUID, parseSeqEvent, RawSeqEvent } from "../types";
+import { fetchSeq, prop, truncHour, ParsedEvent } from "../seq";
+import { getEvents, isReady, storeSize, storeCoverage } from "../accumulator";
+import { EMPTY_GUID } from "../types";
 
 const router = Router();
 
-router.get("/", async (req: Request, res: Response) => {
-  const filters: EventFilters = {
-    level: req.query.level as string,
-    service: req.query.service as string,
-    userId: req.query.userId as string,
-    guidCotacao: req.query.guidCotacao as string,
-    requestPath: req.query.requestPath as string,
-    search: req.query.search as string,
-    startDate: req.query.startDate as string,
-    endDate: req.query.endDate as string,
-    page: parseInt(req.query.page as string) || 1,
-    pageSize: parseInt(req.query.pageSize as string) || 50,
-    emptyGuidOnly: req.query.emptyGuidOnly === "true",
+// ── helpers ──────────────────────────────────────────────────────────────────
+
+function toEvent(e: ParsedEvent, idx: number) {
+  return {
+    id: e.event_id || String(idx),
+    event_id: e.event_id,
+    timestamp: e.timestamp,
+    message: e.message,
+    level: e.level,
+    trace_id: e.trace_id,
+    user_id: e.user_id,
+    guid_cotacao: e.guid_cotacao,
+    service: e.service,
+    environment: e.environment,
+    request_path: e.request_path,
+    source_context: e.source_context,
+    raw_data: e.raw_data,
   };
+}
 
-  const conditions: string[] = [];
-  const params: unknown[] = [];
-  let paramIndex = 1;
+function countBy<T>(arr: T[], key: (x: T) => string | null | undefined): Record<string, number> {
+  const m: Record<string, number> = {};
+  for (const x of arr) {
+    const k = key(x);
+    if (k) m[k] = (m[k] ?? 0) + 1;
+  }
+  return m;
+}
 
-  if (filters.level) {
-    conditions.push(`level = $${paramIndex++}`);
-    params.push(filters.level);
-  }
-  if (filters.service) {
-    conditions.push(`service = $${paramIndex++}`);
-    params.push(filters.service);
-  }
-  if (filters.userId) {
-    conditions.push(`user_id = $${paramIndex++}`);
-    params.push(filters.userId);
-  }
-  if (filters.emptyGuidOnly) {
-    conditions.push(`guid_cotacao = $${paramIndex++}`);
-    params.push(EMPTY_GUID);
-  } else if (filters.guidCotacao) {
-    conditions.push(`guid_cotacao = $${paramIndex++}`);
-    params.push(filters.guidCotacao);
-  }
-  if (filters.requestPath) {
-    conditions.push(`request_path ILIKE $${paramIndex++}`);
-    params.push(`%${filters.requestPath}%`);
-  }
-  if (filters.search) {
-    conditions.push(`message ILIKE $${paramIndex++}`);
-    params.push(`%${filters.search}%`);
-  }
-  if (filters.startDate) {
-    conditions.push(`timestamp >= $${paramIndex++}`);
-    params.push(filters.startDate);
-  }
-  if (filters.endDate) {
-    conditions.push(`timestamp <= $${paramIndex++}`);
-    params.push(filters.endDate);
-  }
+function topN(map: Record<string, number>, n: number) {
+  return Object.entries(map).sort((a, b) => b[1] - a[1]).slice(0, n);
+}
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
-  const offset = ((filters.page || 1) - 1) * (filters.pageSize || 50);
+function emailFrom(msg: string): string | null {
+  return msg?.match(/User:\s*(\S+)\s*\|/)?.[1] ?? null;
+}
+function clientFrom(msg: string): string | null {
+  return msg?.match(/ClientId:\s*(\S+)[\s|]/)?.[1] ?? null;
+}
 
-  const countResult = await query(
-    `SELECT COUNT(*) FROM seq_events ${where}`,
-    params
-  );
-  const total = parseInt(countResult.rows[0].count);
+// ── GET /stats/status ─────────────────────────────────────────────────────────
+router.get("/stats/status", (_req: Request, res: Response) => {
+  const { oldest, newest } = storeCoverage();
+  res.json({ ready: isReady(), events: storeSize(), oldest, newest });
+});
 
-  const dataResult = await query(
-    `SELECT id, event_id, timestamp, message, level, trace_id, user_id, guid_cotacao, service, environment, request_path, source_context, raw_data, created_at
-     FROM seq_events ${where}
-     ORDER BY timestamp DESC
-     LIMIT $${paramIndex++} OFFSET $${paramIndex++}`,
-    [...params, filters.pageSize || 50, offset]
-  );
+// ── GET / ─────────────────────────────────────────────────────────────────────
+router.get("/", (req: Request, res: Response) => {
+  const level       = req.query.level as string | undefined;
+  const search      = (req.query.search as string || "").toLowerCase();
+  const emptyGuidOnly = req.query.emptyGuidOnly === "true";
+  const page        = Math.max(1, parseInt(req.query.page as string) || 1);
+  const pageSize    = Math.min(200, parseInt(req.query.pageSize as string) || 50);
+
+  let events = getEvents();
+  if (level)         events = events.filter(e => e.level === level);
+  if (emptyGuidOnly) events = events.filter(e => e.guid_cotacao === EMPTY_GUID);
+  if (search)        events = events.filter(e => e.message?.toLowerCase().includes(search));
+
+  const total      = events.length;
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+  const slice      = events.slice((page - 1) * pageSize, page * pageSize);
+
+  res.json({ data: slice.map(toEvent), total, page, pageSize, totalPages });
+});
+
+// ── GET /stats/summary ────────────────────────────────────────────────────────
+router.get("/stats/summary", (_req: Request, res: Response) => {
+  const events = getEvents();
+  const total  = events.length;
+  const errors = events.filter(e => e.level === "Error" || e.level === "Critical").length;
+
+  const levelMap = countBy(events, e => e.level);
+  const byLevel  = Object.entries(levelMap).sort((a, b) => b[1] - a[1])
+    .map(([level, count]) => ({ level, count: String(count) }));
+
+  const errorMsgs = countBy(events.filter(e => e.level === "Error"), e => e.message);
+  const topErrors = topN(errorMsgs, 10).map(([message, count]) => ({ message, count: String(count) }));
+
+  const userMap  = countBy(events, e => e.user_id);
+  const topUsers = topN(userMap, 10).map(([user_id, count]) => ({ user_id, count: String(count) }));
+
+  const serviceMap  = countBy(events.filter(e => e.service), e => e.service);
+  const topServices = topN(serviceMap, 10).map(([service, count]) => ({ service, count: String(count) }));
+
+  const relevant   = events.filter(e => e.guid_cotacao != null || e.request_path?.toLowerCase().includes("printitens") || e.request_path?.toLowerCase().includes("quote"));
+  const empty_guid = relevant.filter(e => e.guid_cotacao === EMPTY_GUID).length;
+  const valid_guid = relevant.filter(e => e.guid_cotacao && e.guid_cotacao !== EMPTY_GUID).length;
+  const no_guid    = relevant.filter(e => !e.guid_cotacao).length;
 
   res.json({
-    data: dataResult.rows,
-    total,
-    page: filters.page || 1,
-    pageSize: filters.pageSize || 50,
-    totalPages: Math.ceil(total / (filters.pageSize || 50)),
+    total, errors, byLevel, topErrors, topUsers, topServices,
+    guidBreakdown: {
+      empty_guid: String(empty_guid),
+      valid_guid: String(valid_guid),
+      no_guid: String(no_guid),
+      total_with_cotacao: String(relevant.length),
+    },
   });
 });
 
-const STATS_WINDOW = `timestamp >= NOW() - INTERVAL '4 hours'`;
+// ── GET /stats/timeline ───────────────────────────────────────────────────────
+router.get("/stats/timeline", (req: Request, res: Response) => {
+  const hours    = Math.min(168, parseInt(req.query.hours as string) || 24);
+  const fromDate = new Date(Date.now() - hours * 3600_000);
+  const events   = getEvents().filter(e => new Date(e.timestamp) >= fromDate);
 
-router.get("/stats/summary", async (_req: Request, res: Response) => {
-  const [byLevel, topErrors, topUsers, guidBreakdown, topServices] =
-    await Promise.all([
-      query(
-        `SELECT level, COUNT(*) as count FROM seq_events WHERE ${STATS_WINDOW} GROUP BY level ORDER BY count DESC`
-      ),
-      query(
-        `SELECT message, COUNT(*) as count FROM seq_events WHERE level = 'Error' AND ${STATS_WINDOW}
-         GROUP BY message ORDER BY count DESC LIMIT 10`
-      ),
-      query(
-        `SELECT user_id, COUNT(*) as count FROM seq_events WHERE user_id IS NOT NULL AND ${STATS_WINDOW}
-         GROUP BY user_id ORDER BY count DESC LIMIT 10`
-      ),
-      query(
-        `SELECT
-           SUM(CASE WHEN guid_cotacao = $1 THEN 1 ELSE 0 END) as empty_guid,
-           SUM(CASE WHEN guid_cotacao IS NOT NULL AND guid_cotacao != $1 THEN 1 ELSE 0 END) as valid_guid,
-           SUM(CASE WHEN guid_cotacao IS NULL THEN 1 ELSE 0 END) as no_guid,
-           COUNT(*) as total_with_cotacao
-         FROM seq_events WHERE (request_path ILIKE '%PrintItens%' OR guid_cotacao IS NOT NULL) AND ${STATS_WINDOW}`,
-        [EMPTY_GUID]
-      ),
-      query(
-        `SELECT service, COUNT(*) as count FROM seq_events WHERE service IS NOT NULL AND ${STATS_WINDOW}
-         GROUP BY service ORDER BY count DESC LIMIT 10`
-      ),
+  const map: Record<string, Record<string, number>> = {};
+  for (const e of events) {
+    const hour = truncHour(e.timestamp);
+    if (!map[hour]) map[hour] = {};
+    map[hour][e.level] = (map[hour][e.level] ?? 0) + 1;
+  }
+
+  const result: { hour: string; level: string; count: string }[] = [];
+  for (const hour of Object.keys(map).sort()) {
+    for (const [level, count] of Object.entries(map[hour])) {
+      result.push({ hour, level, count: String(count) });
+    }
+  }
+  res.json(result);
+});
+
+// ── GET /stats/empty-guid-timeline ───────────────────────────────────────────
+// Filtered fetch: vai direto ao Seq pedindo só eventos com GuidQuote
+router.get("/stats/empty-guid-timeline", async (_req: Request, res: Response) => {
+  try {
+    const events = await fetchSeq({
+      filter:   "RequestPath = '/Quote/GetSimpleQuote'",
+      maxTotal: 10000,
+    });
+    const empty = events.filter(e => e.guid_cotacao === EMPTY_GUID);
+
+    const map: Record<string, { count: number; users: Set<string> }> = {};
+    for (const e of empty) {
+      const h = truncHour(e.timestamp);
+      if (!map[h]) map[h] = { count: 0, users: new Set() };
+      map[h].count++;
+      if (e.user_id) map[h].users.add(e.user_id);
+    }
+
+    res.json(Object.keys(map).sort().map(h => ({
+      hour:         h,
+      count:        String(map[h].count),
+      unique_users: String(map[h].users.size),
+    })));
+  } catch (err) {
+    res.status(502).json({ error: String(err) });
+  }
+});
+
+// ── GET /stats/auth-errors ────────────────────────────────────────────────────
+// Filtered fetch: só eventos de falha de autenticação
+router.get("/stats/auth-errors", async (_req: Request, res: Response) => {
+  try {
+    const auth = await fetchSeq({
+      filter:   "Contains(@Message, 'Erro autenticação')",
+      maxTotal: 10000,
+    });
+
+    const tlMap: Record<string, { count: number; users: Set<string> }> = {};
+    for (const e of auth) {
+      const h  = truncHour(e.timestamp);
+      if (!tlMap[h]) tlMap[h] = { count: 0, users: new Set() };
+      tlMap[h].count++;
+      const em = emailFrom(e.message || "");
+      if (em) tlMap[h].users.add(em);
+    }
+    const timeline = Object.keys(tlMap).sort().map(h => ({
+      hour: h, count: String(tlMap[h].count), unique_users: String(tlMap[h].users.size),
+    }));
+
+    const userAgg: Record<string, { count: number; last_seen: string }> = {};
+    for (const e of auth) {
+      const em = emailFrom(e.message || "");
+      if (!em) continue;
+      if (!userAgg[em]) userAgg[em] = { count: 0, last_seen: e.timestamp };
+      userAgg[em].count++;
+      if (e.timestamp > userAgg[em].last_seen) userAgg[em].last_seen = e.timestamp;
+    }
+    const topUsers = topN(countBy(auth, e => emailFrom(e.message || "")), 20)
+      .map(([email]) => ({
+        email,
+        count:     String(userAgg[email]?.count ?? 0),
+        last_seen: userAgg[email]?.last_seen ?? "",
+      }));
+
+    const topClients = topN(countBy(auth, e => clientFrom(e.message || "")), 10)
+      .map(([client_id, count]) => ({ client_id, count: String(count) }));
+
+    const recentEvents = auth.slice(0, 100).map((e, i) => ({
+      id: e.event_id || i,
+      event_id:     e.event_id || "",
+      timestamp:    e.timestamp,
+      message:      e.message,
+      level:        e.level,
+      trace_id:     e.trace_id,
+      request_path: e.request_path,
+    }));
+
+    res.json({ total: auth.length, timeline, topUsers, topClients, recentEvents });
+  } catch (err) {
+    res.status(502).json({ error: String(err) });
+  }
+});
+
+// ── GET /stats/kong-auth ──────────────────────────────────────────────────────
+// Filtered fetch: só eventos Kong Auth Request
+router.get("/stats/kong-auth", async (_req: Request, res: Response) => {
+  try {
+    const kongAll = await fetchSeq({
+      filter:   "@Message = 'Kong Auth Request'",
+      maxTotal: 10000,
+    });
+    const kongFail = kongAll.filter(e => Number(prop(e, "StatusCode")) !== 200);
+
+    const total     = kongAll.length;
+    const failures  = kongFail.length;
+    const successes = kongAll.filter(e => Number(prop(e, "StatusCode")) === 200).length;
+    const fail401   = kongFail.filter(e => Number(prop(e, "StatusCode")) === 401).length;
+    const fail500   = kongFail.filter(e => Number(prop(e, "StatusCode")) === 500).length;
+
+    const tlMap: Record<string, { f: number; s: number }> = {};
+    for (const e of kongAll) {
+      const h = truncHour(e.timestamp);
+      if (!tlMap[h]) tlMap[h] = { f: 0, s: 0 };
+      Number(prop(e, "StatusCode")) === 200 ? tlMap[h].s++ : tlMap[h].f++;
+    }
+    const timeline = Object.keys(tlMap).sort().map(h => ({
+      hora: h, falhas: tlMap[h].f, sucessos: tlMap[h].s,
+    }));
+
+    const userAgg: Record<string, { falhas: number; first: string; last: string }> = {};
+    for (const e of kongFail) {
+      const u = prop(e, "Username") || "";
+      if (!u) continue;
+      if (!userAgg[u]) userAgg[u] = { falhas: 0, first: e.timestamp, last: e.timestamp };
+      userAgg[u].falhas++;
+      if (e.timestamp < userAgg[u].first) userAgg[u].first = e.timestamp;
+      if (e.timestamp > userAgg[u].last)  userAgg[u].last  = e.timestamp;
+    }
+    const topUsers = Object.entries(userAgg)
+      .sort((a, b) => b[1].falhas - a[1].falhas).slice(0, 20)
+      .map(([username, v]) => ({
+        username, falhas: String(v.falhas), first_seen: v.first, last_seen: v.last,
+      }));
+
+    const ipAgg: Record<string, { falhas: number; users: Set<string>; first: string; last: string }> = {};
+    for (const e of kongFail) {
+      const ip = prop(e, "ClientIP") || "";
+      if (!ip) continue;
+      if (!ipAgg[ip]) ipAgg[ip] = { falhas: 0, users: new Set(), first: e.timestamp, last: e.timestamp };
+      ipAgg[ip].falhas++;
+      const u = prop(e, "Username");
+      if (u) ipAgg[ip].users.add(u);
+      if (e.timestamp < ipAgg[ip].first) ipAgg[ip].first = e.timestamp;
+      if (e.timestamp > ipAgg[ip].last)  ipAgg[ip].last  = e.timestamp;
+    }
+    const topIPs = Object.entries(ipAgg)
+      .sort((a, b) => b[1].falhas - a[1].falhas).slice(0, 15)
+      .map(([client_ip, v]) => ({
+        client_ip, falhas: String(v.falhas), usuarios_unicos: String(v.users.size),
+        first_seen: v.first, last_seen: v.last,
+      }));
+
+    const stuffing = Object.entries(ipAgg)
+      .filter(([, v]) => v.users.size >= 3)
+      .sort((a, b) => b[1].users.size - a[1].users.size)
+      .map(([client_ip, v]) => {
+        const ms = new Date(v.last).getTime() - new Date(v.first).getTime();
+        return {
+          client_ip, usuarios_tentados: String(v.users.size), total_falhas: String(v.falhas),
+          janela_min: String((ms / 60000).toFixed(1)), first_seen: v.first, last_seen: v.last,
+        };
+      });
+
+    const emailRe = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+    const anonAgg: Record<string, { count: number; ips: Set<string> }> = {};
+    for (const e of kongFail) {
+      const u = prop(e, "Username") || "";
+      if (!u || emailRe.test(u)) continue;
+      if (!anonAgg[u]) anonAgg[u] = { count: 0, ips: new Set() };
+      anonAgg[u].count++;
+      const ip = prop(e, "ClientIP");
+      if (ip) anonAgg[u].ips.add(ip);
+    }
+    const anomalousUsernames = Object.entries(anonAgg)
+      .sort((a, b) => b[1].count - a[1].count)
+      .map(([username, v]) => ({
+        username, client_ip: [...v.ips].join(", "), tentativas: String(v.count),
+      }));
+
+    const serverErrors = kongFail
+      .filter(e => Number(prop(e, "StatusCode")) === 500)
+      .map(e => ({
+        timestamp: e.timestamp, username: prop(e, "Username"),
+        client_ip: prop(e, "ClientIP"), path: prop(e, "Path"),
+      }));
+
+    const recentFailures = kongFail.slice(0, 50).map((e, i) => ({
+      id: i, timestamp: e.timestamp, username: prop(e, "Username"),
+      client_ip: prop(e, "ClientIP"), path: prop(e, "Path"),
+      status_code: Number(prop(e, "StatusCode")), module: prop(e, "Module"),
+    }));
+
+    res.json({
+      summary: {
+        total, failures, successes, failures401: fail401, failures500: fail500,
+        failurePct: total > 0 ? parseFloat((failures / total * 100).toFixed(1)) : 0,
+      },
+      timeline, topUsers, topIPs, credentialStuffing: stuffing,
+      anomalousUsernames, serverErrors, recentFailures,
+    });
+  } catch (err) {
+    res.status(502).json({ error: String(err) });
+  }
+});
+
+// ── GET /stats/security ───────────────────────────────────────────────────────
+// Usa o acumulador + fetch paralelo de auth errors para brute force histórico
+router.get("/stats/security", async (_req: Request, res: Response) => {
+  try {
+    // Para análises que precisam de profundidade histórica, fetch com filtro
+    const [accEvents, authFiltered] = await Promise.all([
+      Promise.resolve(getEvents()),
+      fetchSeq({ filter: "Contains(@Message, 'Erro autenticação')", maxTotal: 10000 }),
     ]);
 
-  const totalResult = await query(`SELECT COUNT(*) FROM seq_events WHERE ${STATS_WINDOW}`);
-  const errorResult = await query(
-    `SELECT COUNT(*) FROM seq_events WHERE level = 'Error' AND ${STATS_WINDOW}`
-  );
+    const authFails = authFiltered;
+    const errors    = accEvents.filter(e => e.level === "Error" || e.level === "Critical");
+    const criticals = accEvents.filter(e => e.level === "Critical");
 
-  res.json({
-    total: parseInt(totalResult.rows[0].count),
-    errors: parseInt(errorResult.rows[0].count),
-    byLevel: byLevel.rows,
-    topErrors: topErrors.rows,
-    topUsers: topUsers.rows,
-    guidBreakdown: guidBreakdown.rows[0],
-    topServices: topServices.rows,
-  });
-});
-
-router.get("/stats/timeline", async (req: Request, res: Response) => {
-  const hours = parseInt(req.query.hours as string) || 24;
-  const result = await query(
-    `SELECT
-       date_trunc('hour', timestamp) as hour,
-       level,
-       COUNT(*) as count
-     FROM seq_events
-     WHERE timestamp >= NOW() - INTERVAL '${hours} hours'
-     GROUP BY hour, level
-     ORDER BY hour ASC`
-  );
-  res.json(result.rows);
-});
-
-router.get("/stats/empty-guid-timeline", async (_req: Request, res: Response) => {
-  const result = await query(
-    `SELECT
-       date_trunc('hour', timestamp) as hour,
-       COUNT(*) as count,
-       COUNT(DISTINCT user_id) as unique_users
-     FROM seq_events
-     WHERE guid_cotacao = $1 AND ${STATS_WINDOW}
-     GROUP BY hour
-     ORDER BY hour ASC`,
-    [EMPTY_GUID]
-  );
-  res.json(result.rows);
-});
-
-router.get("/stats/auth-errors", async (_req: Request, res: Response) => {
-  const WHERE = `message ILIKE '%Erro autenticação%' AND ${STATS_WINDOW}`;
-
-  const [totalRes, timelineRes, topUsersRes, topClientsRes, recentRes] = await Promise.all([
-    query(`SELECT COUNT(*) FROM seq_events WHERE ${WHERE}`),
-    query(`
-      SELECT
-        date_trunc('hour', timestamp) AS hour,
-        COUNT(*) AS count,
-        COUNT(DISTINCT (regexp_match(message, 'User:\\s*(\\S+)\\s*\\|'))[1]) AS unique_users
-      FROM seq_events
-      WHERE ${WHERE}
-      GROUP BY hour
-      ORDER BY hour ASC
-    `),
-    query(`
-      SELECT
-        (regexp_match(message, 'User:\\s*(\\S+)\\s*\\|'))[1] AS email,
-        COUNT(*) AS count,
-        MAX(timestamp) AS last_seen
-      FROM seq_events
-      WHERE ${WHERE}
-      GROUP BY (regexp_match(message, 'User:\\s*(\\S+)\\s*\\|'))[1]
-      HAVING (regexp_match(message, 'User:\\s*(\\S+)\\s*\\|'))[1] IS NOT NULL
-      ORDER BY count DESC
-      LIMIT 20
-    `),
-    query(`
-      SELECT
-        (regexp_match(message, 'ClientId:\\s*(\\S+)\\s*\\|'))[1] AS client_id,
-        COUNT(*) AS count
-      FROM seq_events
-      WHERE ${WHERE}
-      GROUP BY (regexp_match(message, 'ClientId:\\s*(\\S+)\\s*\\|'))[1]
-      HAVING (regexp_match(message, 'ClientId:\\s*(\\S+)\\s*\\|'))[1] IS NOT NULL
-      ORDER BY count DESC
-      LIMIT 10
-    `),
-    query(`
-      SELECT id, event_id, timestamp, message, level, trace_id, request_path
-      FROM seq_events
-      WHERE ${WHERE}
-      ORDER BY timestamp DESC
-      LIMIT 100
-    `),
-  ]);
-
-  res.json({
-    total: parseInt(totalRes.rows[0].count),
-    timeline: timelineRes.rows,
-    topUsers: topUsersRes.rows,
-    topClients: topClientsRes.rows,
-    recentEvents: recentRes.rows,
-  });
-});
-
-router.get("/stats/kong-auth", async (_req: Request, res: Response) => {
-  const KONG_BASE = `message = 'Kong Auth Request'`;
-
-  const extractProp = (name: string, cast = "") =>
-    `(SELECT (elem->>'Value')${cast} FROM jsonb_array_elements(raw_data->'Properties') elem WHERE elem->>'Name' = '${name}')`;
-
-  const statusCode = extractProp("StatusCode", "::int");
-  const username   = extractProp("Username");
-  const clientIp   = extractProp("ClientIP");
-  const path       = extractProp("Path");
-  const module_    = extractProp("Module");
-
-  const CTE = `
-    WITH kong AS (
-      SELECT
-        id, timestamp,
-        ${statusCode} AS status_code,
-        ${username}   AS username,
-        ${clientIp}   AS client_ip,
-        ${path}       AS path,
-        ${module_}    AS module
-      FROM seq_events
-      WHERE ${KONG_BASE}
-    ),
-    kong_fail AS (SELECT * FROM kong WHERE status_code != 200)
-  `;
-
-  const [
-    summaryRes,
-    timelineRes,
-    topUsersRes,
-    topIPsRes,
-    stuffingRes,
-    anomalousRes,
-    serverErrorsRes,
-    recentRes,
-  ] = await Promise.all([
-    query(`${CTE}
-      SELECT
-        COUNT(*) AS total,
-        SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END) AS failures,
-        SUM(CASE WHEN status_code = 200  THEN 1 ELSE 0 END) AS successes,
-        SUM(CASE WHEN status_code = 401  THEN 1 ELSE 0 END) AS failures_401,
-        SUM(CASE WHEN status_code = 500  THEN 1 ELSE 0 END) AS failures_500
-      FROM kong`),
-
-    query(`${CTE}
-      SELECT
-        date_trunc('hour', timestamp) AS hora,
-        SUM(CASE WHEN status_code != 200 THEN 1 ELSE 0 END) AS falhas,
-        SUM(CASE WHEN status_code = 200  THEN 1 ELSE 0 END) AS sucessos
-      FROM kong GROUP BY hora ORDER BY hora ASC`),
-
-    query(`${CTE}
-      SELECT username, COUNT(*) AS falhas, MIN(timestamp) AS first_seen, MAX(timestamp) AS last_seen
-      FROM kong_fail WHERE username IS NOT NULL
-      GROUP BY username ORDER BY falhas DESC LIMIT 20`),
-
-    query(`${CTE}
-      SELECT client_ip,
-        COUNT(*) AS falhas,
-        COUNT(DISTINCT username) AS usuarios_unicos,
-        MIN(timestamp) AS first_seen,
-        MAX(timestamp) AS last_seen
-      FROM kong_fail WHERE client_ip IS NOT NULL
-      GROUP BY client_ip ORDER BY falhas DESC LIMIT 15`),
-
-    query(`${CTE}
-      SELECT client_ip,
-        COUNT(DISTINCT username) AS usuarios_tentados,
-        COUNT(*) AS total_falhas,
-        ROUND(EXTRACT(EPOCH FROM (MAX(timestamp)-MIN(timestamp)))/60.0,1) AS janela_min,
-        MIN(timestamp) AS first_seen,
-        MAX(timestamp) AS last_seen
-      FROM kong_fail WHERE client_ip IS NOT NULL
-      GROUP BY client_ip
-      HAVING COUNT(DISTINCT username) >= 3
-      ORDER BY usuarios_tentados DESC`),
-
-    query(`${CTE}
-      SELECT username, client_ip, COUNT(*) AS tentativas
-      FROM kong_fail
-      WHERE username IS NOT NULL
-        AND username !~ '^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$'
-      GROUP BY username, client_ip ORDER BY tentativas DESC`),
-
-    query(`${CTE}
-      SELECT timestamp, username, client_ip, path
-      FROM kong_fail WHERE status_code = 500
-      ORDER BY timestamp DESC`),
-
-    query(`${CTE}
-      SELECT id, timestamp, username, client_ip, path, status_code, module
-      FROM kong_fail ORDER BY timestamp DESC LIMIT 50`),
-  ]);
-
-  const s = summaryRes.rows[0];
-  const total   = parseInt(s.total   || "0");
-  const failures = parseInt(s.failures || "0");
-
-  res.json({
-    summary: {
-      total,
-      failures,
-      successes: parseInt(s.successes    || "0"),
-      failures401: parseInt(s.failures_401 || "0"),
-      failures500: parseInt(s.failures_500 || "0"),
-      failurePct: total > 0 ? parseFloat((failures / total * 100).toFixed(1)) : 0,
-    },
-    timeline: timelineRes.rows.map((r) => ({
-      hora: r.hora,
-      falhas: parseInt(r.falhas),
-      sucessos: parseInt(r.sucessos),
-    })),
-    topUsers: topUsersRes.rows,
-    topIPs: topIPsRes.rows,
-    credentialStuffing: stuffingRes.rows,
-    anomalousUsernames: anomalousRes.rows,
-    serverErrors: serverErrorsRes.rows,
-    recentFailures: recentRes.rows,
-  });
-});
-
-router.get("/stats/security", async (_req: Request, res: Response) => {
-  const AUTH_FILTER = `message ILIKE '%Erro autenticação%' AND ${STATS_WINDOW}`;
-
-  const [
-    totalAuthRes,
-    bruteForceRes,
-    anomalousUsernameRes,
-    endpointBreakdownRes,
-    criticalRes,
-    onlyEmptyGuidRes,
-    swaggerEvidenceRes,
-    stackTraceEndpointsRes,
-    jwtInLogsRes,
-    expiredCertRes,
-    dataProtectionRes,
-    forwardedHeadersRes,
-    efClientEvalRes,
-    hangfireRes,
-    vehicleIpRes,
-    slowQueriesRes,
-  ] = await Promise.all([
-    // Auth failures per endpoint+client
-    query(`
-      SELECT
-        request_path,
-        (regexp_match(message, 'ClientId:\\s*(\\S+)\\s*[\\|$]'))[1] AS client_id,
-        COUNT(*) AS failures,
-        COUNT(DISTINCT (regexp_match(message, 'User:\\s*(\\S+)\\s*\\|'))[1]) AS unique_users
-      FROM seq_events
-      WHERE ${AUTH_FILTER}
-      GROUP BY request_path, (regexp_match(message, 'ClientId:\\s*(\\S+)\\s*[\\|$]'))[1]
-      ORDER BY failures DESC
-    `),
-    // Brute force: >=3 failures in <5 min
-    query(`
-      SELECT
-        (regexp_match(message, 'User:\\s*(\\S+)\\s*\\|'))[1] AS username,
-        COUNT(*) AS attempts,
-        ROUND(EXTRACT(EPOCH FROM (MAX(timestamp) - MIN(timestamp))) / 60.0, 1) AS window_minutes,
-        ROUND(COUNT(*) / NULLIF(EXTRACT(EPOCH FROM (MAX(timestamp) - MIN(timestamp))) / 60.0, 0), 1) AS rate_per_min,
-        MIN(timestamp) AS first_seen,
-        MAX(timestamp) AS last_seen
-      FROM seq_events
-      WHERE ${AUTH_FILTER}
-      GROUP BY (regexp_match(message, 'User:\\s*(\\S+)\\s*\\|'))[1]
-      HAVING COUNT(*) >= 3
-        AND EXTRACT(EPOCH FROM (MAX(timestamp) - MIN(timestamp))) < 300
-        AND (regexp_match(message, 'User:\\s*(\\S+)\\s*\\|'))[1] IS NOT NULL
-      ORDER BY rate_per_min DESC NULLS LAST
-      LIMIT 20
-    `),
-    // Non-email usernames
-    query(`
-      SELECT DISTINCT
-        (regexp_match(message, 'User:\\s*(\\S+)\\s*\\|'))[1] AS username,
-        COUNT(*) OVER (PARTITION BY (regexp_match(message, 'User:\\s*(\\S+)\\s*\\|'))[1]) AS attempts
-      FROM seq_events
-      WHERE ${AUTH_FILTER}
-        AND (regexp_match(message, 'User:\\s*(\\S+)\\s*\\|'))[1] IS NOT NULL
-        AND (regexp_match(message, 'User:\\s*(\\S+)\\s*\\|'))[1] !~ '^[a-zA-Z0-9._%+\\-]+@[a-zA-Z0-9.\\-]+\\.[a-zA-Z]{2,}$'
-      ORDER BY attempts DESC
-    `),
-    // Top endpoints by error count
-    query(`
-      SELECT request_path, level, COUNT(*) AS count
-      FROM seq_events
-      WHERE level IN ('Error', 'Critical') AND request_path IS NOT NULL AND ${STATS_WINDOW}
-      GROUP BY request_path, level
-      ORDER BY count DESC
-      LIMIT 15
-    `),
-    // Critical unhandled exceptions
-    query(`
-      SELECT source_context, COUNT(*) AS count, MAX(timestamp) AS last_seen
-      FROM seq_events
-      WHERE level = 'Critical' AND ${STATS_WINDOW}
-      GROUP BY source_context
-      ORDER BY count DESC
-    `),
-    // Users with 100% empty GUID
-    query(`
-      SELECT user_id, COUNT(*) AS empty_guid_calls
-      FROM seq_events
-      WHERE guid_cotacao = $1 AND user_id IS NOT NULL AND ${STATS_WINDOW}
-      GROUP BY user_id
-      HAVING user_id NOT IN (
-        SELECT DISTINCT user_id FROM seq_events
-        WHERE guid_cotacao IS NOT NULL AND guid_cotacao != $1 AND user_id IS NOT NULL AND ${STATS_WINDOW}
-      )
-      ORDER BY empty_guid_calls DESC
-      LIMIT 10
-    `, [EMPTY_GUID]),
-    // Swagger in production
-    query(`
-      SELECT COUNT(*) AS count FROM seq_events
-      WHERE (message ILIKE '%SwaggerMiddleware%' OR message ILIKE '%SwaggerUI%') AND ${STATS_WINDOW}
-    `),
-    // Stack traces exposed
-    query(`
-      SELECT request_path, COUNT(*) AS count
-      FROM seq_events
-      WHERE (message ILIKE '%   at %' OR message ILIKE '%stack trace%')
-        AND request_path IS NOT NULL AND level IN ('Error', 'Critical') AND ${STATS_WINDOW}
-      GROUP BY request_path
-      ORDER BY count DESC
-      LIMIT 10
-    `),
-    // JWT tokens logged in plain text
-    query(`
-      SELECT
-        COUNT(*) AS total_occurrences,
-        COUNT(DISTINCT (regexp_match(message, 'TokenRecebido:\\s*(\\S+)'))[1]) AS unique_tokens,
-        MIN(timestamp) AS first_seen,
-        MAX(timestamp) AS last_seen
-      FROM seq_events
-      WHERE message ILIKE '%TokenRecebido%' AND ${STATS_WINDOW}
-    `),
-    // Expired SSL certificate warnings
-    query(`
-      SELECT
-        COUNT(*) AS count,
-        (regexp_match(message, 'Certificate ([^h]+) has expired'))[1] AS cert_name,
-        (regexp_match(message, 'expired on (.+)'))[1] AS expired_on,
-        MIN(timestamp) AS first_seen,
-        MAX(timestamp) AS last_seen
-      FROM seq_events
-      WHERE message ILIKE '%Certificate%expired%' AND ${STATS_WINDOW}
-      GROUP BY cert_name, expired_on
-    `),
-    // DataProtection keys without encryption
-    query(`
-      SELECT COUNT(*) AS count, MAX(timestamp) AS last_seen
-      FROM seq_events
-      WHERE source_context ILIKE '%DataProtection%'
-        AND message ILIKE '%unencrypted%' AND ${STATS_WINDOW}
-    `),
-    // ForwardedHeaders mismatch (IP spoofing risk)
-    query(`
-      SELECT COUNT(*) AS count
-      FROM seq_events
-      WHERE source_context ILIKE '%ForwardedHeaders%' AND level = 'Warning' AND ${STATS_WINDOW}
-    `),
-    // EF Core client-side evaluation
-    query(`
-      SELECT
-        SUM(CASE WHEN message ILIKE '%evaluated locally%' THEN 1 ELSE 0 END) AS local_eval,
-        SUM(CASE WHEN message ILIKE '%without OrderBy%' THEN 1 ELSE 0 END) AS no_order_by
-      FROM seq_events
-      WHERE source_context = 'Microsoft.EntityFrameworkCore.Query' AND level = 'Warning' AND ${STATS_WINDOW}
-    `),
-    // Hangfire failing jobs
-    query(`
-      SELECT message, COUNT(*) AS count, MAX(timestamp) AS last_seen
-      FROM seq_events
-      WHERE source_context ILIKE '%Hangfire%' AND level != 'Information' AND ${STATS_WINDOW}
-      GROUP BY message
-      ORDER BY count DESC
-      LIMIT 10
-    `),
-    // Unique vehicle IPs in logs (PocSag — privacy/LGPD)
-    query(`
-      SELECT COUNT(DISTINCT (regexp_match(message, 'PocSag\\s*:\\s*([0-9.]+)'))[1]) AS unique_ips
-      FROM seq_events WHERE message ILIKE '%PocSag%' AND ${STATS_WINDOW}
-    `),
-    // Slow DB queries (> 500ms)
-    query(`
-      SELECT COUNT(*) AS count,
-        MAX((regexp_match(message, '(\\d+)ms'))[1]::int) AS max_ms
-      FROM seq_events
-      WHERE source_context = 'Microsoft.EntityFrameworkCore.Database.Command'
-        AND message ~ '\\d+ms'
-        AND (regexp_match(message, '(\\d+)ms'))[1]::int > 500
-        AND ${STATS_WINDOW}
-    `),
-  ]);
-
-  res.json({
-    authByEndpoint: totalAuthRes.rows,
-    bruteForce: bruteForceRes.rows,
-    anomalousUsernames: anomalousUsernameRes.rows,
-    topErrorEndpoints: endpointBreakdownRes.rows,
-    criticalByContext: criticalRes.rows,
-    onlyEmptyGuidUsers: onlyEmptyGuidRes.rows,
-    swaggerEvidence: parseInt(swaggerEvidenceRes.rows[0]?.count || "0"),
-    stackTraceEndpoints: stackTraceEndpointsRes.rows,
-    jwtInLogs: {
-      total: parseInt(jwtInLogsRes.rows[0]?.total_occurrences || "0"),
-      uniqueTokens: parseInt(jwtInLogsRes.rows[0]?.unique_tokens || "0"),
-      firstSeen: jwtInLogsRes.rows[0]?.first_seen || null,
-      lastSeen: jwtInLogsRes.rows[0]?.last_seen || null,
-    },
-    expiredCerts: expiredCertRes.rows,
-    dataProtectionUnencrypted: parseInt(dataProtectionRes.rows[0]?.count || "0"),
-    forwardedHeadersMismatch: parseInt(forwardedHeadersRes.rows[0]?.count || "0"),
-    efClientEval: {
-      localEval: parseInt(efClientEvalRes.rows[0]?.local_eval || "0"),
-      noOrderBy: parseInt(efClientEvalRes.rows[0]?.no_order_by || "0"),
-    },
-    hangfireFailures: hangfireRes.rows,
-    vehicleIpsExposed: parseInt(vehicleIpRes.rows[0]?.unique_ips || "0"),
-    slowQueries: {
-      count: parseInt(slowQueriesRes.rows[0]?.count || "0"),
-      maxMs: parseInt(slowQueriesRes.rows[0]?.max_ms || "0"),
-    },
-  });
-});
-
-router.get("/:id", async (req: Request, res: Response) => {
-  const result = await query(
-    `SELECT * FROM seq_events WHERE id = $1`,
-    [req.params.id]
-  );
-  if (result.rows.length === 0) {
-    res.status(404).json({ error: "Evento não encontrado" });
-    return;
-  }
-  res.json(result.rows[0]);
-});
-
-router.delete("/", async (_req: Request, res: Response) => {
-  await query(`DELETE FROM seq_events`);
-  res.json({ message: "Todos os eventos foram removidos" });
-});
-
-router.post("/import", async (req: Request, res: Response) => {
-  const events: RawSeqEvent[] = req.body;
-  if (!Array.isArray(events)) {
-    res.status(400).json({ error: "Body deve ser um array de eventos" });
-    return;
-  }
-
-  let imported = 0;
-  let skipped = 0;
-
-  for (const raw of events) {
-    const parsed = parseSeqEvent(raw);
-    try {
-      await query(
-        `INSERT INTO seq_events (event_id, timestamp, message_template, message, level, trace_id, span_id, user_id, guid_cotacao, service, environment, request_path, source_context, raw_data)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-         ON CONFLICT (event_id) DO NOTHING`,
-        [
-          parsed.event_id,
-          parsed.timestamp,
-          parsed.message_template,
-          parsed.message,
-          parsed.level,
-          parsed.trace_id,
-          parsed.span_id,
-          parsed.user_id,
-          parsed.guid_cotacao,
-          parsed.service,
-          parsed.environment,
-          parsed.request_path,
-          parsed.source_context,
-          JSON.stringify(parsed.raw_data),
-        ]
-      );
-      imported++;
-    } catch {
-      skipped++;
+    // 1. Auth failures by endpoint + client
+    const epMap: Record<string, { failures: number; users: Set<string> }> = {};
+    for (const e of authFails) {
+      const key = `${e.request_path || ""}||${clientFrom(e.message || "") || ""}`;
+      if (!epMap[key]) epMap[key] = { failures: 0, users: new Set() };
+      epMap[key].failures++;
+      const em = emailFrom(e.message || "");
+      if (em) epMap[key].users.add(em);
     }
-  }
+    const authByEndpoint = Object.entries(epMap)
+      .sort((a, b) => b[1].failures - a[1].failures)
+      .map(([key, v]) => {
+        const [request_path, client_id] = key.split("||");
+        return { request_path, client_id, failures: String(v.failures), unique_users: String(v.users.size) };
+      });
 
-  res.json({ imported, skipped, total: events.length });
-});
+    // 2. Brute force (histórico completo via filtro)
+    const bfMap: Record<string, Date[]> = {};
+    for (const e of authFails) {
+      const u = emailFrom(e.message || "");
+      if (!u) continue;
+      if (!bfMap[u]) bfMap[u] = [];
+      bfMap[u].push(new Date(e.timestamp));
+    }
+    const bruteForce = Object.entries(bfMap)
+      .filter(([, ts]) => {
+        if (ts.length < 3) return false;
+        const sorted = ts.sort((a, b) => a.getTime() - b.getTime());
+        return (sorted[sorted.length - 1].getTime() - sorted[0].getTime()) < 300_000;
+      })
+      .map(([username, ts]) => {
+        const sorted = ts.sort((a, b) => a.getTime() - b.getTime());
+        const ms = sorted[sorted.length - 1].getTime() - sorted[0].getTime();
+        const winMin = ms / 60000;
+        return {
+          username, attempts: String(ts.length),
+          window_minutes: String(winMin.toFixed(1)),
+          rate_per_min: String(winMin > 0 ? (ts.length / winMin).toFixed(1) : "∞"),
+          first_seen: sorted[0].toISOString(),
+          last_seen: sorted[sorted.length - 1].toISOString(),
+        };
+      })
+      .sort((a, b) => parseFloat(b.rate_per_min) - parseFloat(a.rate_per_min))
+      .slice(0, 20);
 
-router.post("/sample", async (_req: Request, res: Response) => {
-  const levels = ["Error", "Error", "Error", "Warning", "Information"];
-  const users = ["1348383", "1348384", "1348385", "1348386", "1348387", "1348388"];
-  const guids = [
-    EMPTY_GUID,
-    EMPTY_GUID,
-    EMPTY_GUID,
-    "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
-    "b2c3d4e5-f6a7-8901-bcde-f12345678901",
-  ];
+    // 3. Anomalous usernames
+    const emailRe = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
+    const anomMap = countBy(
+      authFails.filter(e => { const u = emailFrom(e.message || ""); return u && !emailRe.test(u); }),
+      e => emailFrom(e.message || "")
+    );
+    const anomalousUsernames = topN(anomMap, 50).map(([username, count]) => ({
+      username, attempts: String(count),
+    }));
 
-  let imported = 0;
-  const now = new Date();
+    // 4. Top error endpoints
+    const epErrMap: Record<string, number> = {};
+    for (const e of errors) {
+      if (!e.request_path) continue;
+      const key = `${e.request_path}||${e.level}`;
+      epErrMap[key] = (epErrMap[key] ?? 0) + 1;
+    }
+    const topErrorEndpoints = topN(epErrMap, 15).map(([key, count]) => {
+      const [request_path, level] = key.split("||");
+      return { request_path, level, count: String(count) };
+    });
 
-  for (let i = 0; i < 80; i++) {
-    const level = levels[Math.floor(Math.random() * levels.length)];
-    const userId = users[Math.floor(Math.random() * users.length)];
-    const guidCotacao = guids[Math.floor(Math.random() * guids.length)];
-    const isError = level === "Error";
-    const ts = new Date(now.getTime() - Math.random() * 24 * 60 * 60 * 1000);
+    // 5. Critical by source_context
+    const ctxMap = countBy(criticals, e => e.source_context);
+    const ctxLast: Record<string, string> = {};
+    for (const e of criticals) { if (e.source_context) ctxLast[e.source_context] = e.timestamp; }
+    const criticalByContext = topN(ctxMap, 20).map(([source_context, count]) => ({
+      source_context, count: String(count), last_seen: ctxLast[source_context] ?? "",
+    }));
 
-    const raw: RawSeqEvent = {
-      "@t": ts.toISOString(),
-      "@mt": isError
-        ? `[salesbo-66cb5b49c6-vgtg5] [Ituran.Integra.Sales.Backoffice] Quote | GetPdfItemsToPrint | Quote/PrintItens | UserId: ${userId} | GUID_COTACAO: ${guidCotacao} | Error: Cotação não encontrada |    at Ituran.Integra.Sales.Backoffice.Features.Quote.GetPdfItemsToPrint.GetPdfItemsToPrintEndpoint.HandleAsync`
-        : `[salesbo-66cb5b49c6-vgtg5] [Ituran.Integra.Sales.Backoffice] Quote | GetPdfItemsToPrint | Quote/PrintItens | UserId: ${userId} | GUID_COTACAO: ${guidCotacao} | Success`,
-      "@i": `sample-${i}-${Date.now()}`,
-      "@l": level,
-      "@@tr": `trace${Math.random().toString(36).substring(7)}`,
-      "@@sp": `span${Math.random().toString(36).substring(7)}`,
-      SourceContext:
-        "Ituran.Integra.Sales.Backoffice.Features.Quote.GetPdfItemsToPrint.GetPdfItemsToPrintEndpoint",
-      dd_service: "salesbo",
-      dd_env: "integra-prd",
-      RequestPath: "/Quote/PrintItens",
+    // 6. Users with only empty GUIDs
+    const quoteEvents = accEvents.filter(e => e.guid_cotacao != null || e.request_path?.toLowerCase().includes("quote"));
+    const emptyGuidUsers = new Set(quoteEvents.filter(e => e.guid_cotacao === EMPTY_GUID && e.user_id).map(e => e.user_id!));
+    const validGuidUsers = new Set(quoteEvents.filter(e => e.guid_cotacao && e.guid_cotacao !== EMPTY_GUID && e.user_id).map(e => e.user_id!));
+    const onlyEmptyGuidUsers = [...emptyGuidUsers]
+      .filter(u => !validGuidUsers.has(u))
+      .map(u => ({
+        user_id: u,
+        empty_guid_calls: String(quoteEvents.filter(e => e.user_id === u && e.guid_cotacao === EMPTY_GUID).length),
+      }))
+      .sort((a, b) => parseInt(b.empty_guid_calls) - parseInt(a.empty_guid_calls))
+      .slice(0, 10);
+
+    // 7. Swagger in production
+    const swaggerEvidence = accEvents.filter(e =>
+      e.message?.toLowerCase().includes("swaggermiddleware") || e.message?.toLowerCase().includes("swaggerui")
+    ).length;
+
+    // 8. Stack traces exposed
+    const stackMap: Record<string, number> = {};
+    for (const e of errors) {
+      if (!e.request_path) continue;
+      if (e.message?.includes("   at ") || e.message?.toLowerCase().includes("stack trace")) {
+        stackMap[e.request_path] = (stackMap[e.request_path] ?? 0) + 1;
+      }
+    }
+    const stackTraceEndpoints = topN(stackMap, 10).map(([request_path, count]) => ({
+      request_path, count: String(count),
+    }));
+
+    // 9. JWT tokens in logs
+    const jwtEvents = accEvents.filter(e => e.message?.includes("TokenRecebido"));
+    const uniqueTokens = new Set(jwtEvents.map(e => e.message?.match(/TokenRecebido:\s*(\S+)/)?.[1]).filter(Boolean)).size;
+
+    // 10. Expired certs
+    const certEvents = accEvents.filter(e => e.message?.toLowerCase().includes("certificate") && e.message?.toLowerCase().includes("expired"));
+    const certMap: Record<string, { count: number; name: string | null; expiredOn: string | null; first: string; last: string }> = {};
+    for (const e of certEvents) {
+      const certName = e.message?.match(/Certificate ([^h]+) has expired/)?.[1]?.trim() ?? null;
+      const expOn    = e.message?.match(/expired on (.+)/)?.[1]?.trim() ?? null;
+      const key = `${certName}||${expOn}`;
+      if (!certMap[key]) certMap[key] = { count: 0, name: certName, expiredOn: expOn, first: e.timestamp, last: e.timestamp };
+      certMap[key].count++;
+      if (e.timestamp > certMap[key].last) certMap[key].last = e.timestamp;
+    }
+    const expiredCerts = Object.values(certMap).map(v => ({
+      count: String(v.count), cert_name: v.name ?? "", expired_on: v.expiredOn ?? "",
+      first_seen: v.first, last_seen: v.last,
+    }));
+
+    // 11–16. Infrastructure checks
+    const dataProtectionUnencrypted = accEvents.filter(e =>
+      e.source_context?.toLowerCase().includes("dataprotection") && e.message?.toLowerCase().includes("unencrypted")
+    ).length;
+
+    const forwardedHeadersMismatch = accEvents.filter(e =>
+      e.source_context?.toLowerCase().includes("forwardedheaders") && e.level === "Warning"
+    ).length;
+
+    const efEvents = accEvents.filter(e => e.source_context === "Microsoft.EntityFrameworkCore.Query" && e.level === "Warning");
+    const efClientEval = {
+      localEval: efEvents.filter(e => e.message?.toLowerCase().includes("evaluated locally")).length,
+      noOrderBy: efEvents.filter(e => e.message?.toLowerCase().includes("without orderby")).length,
     };
-    raw["@m"] = raw["@mt"];
 
-    const parsed = parseSeqEvent(raw);
-    try {
-      await query(
-        `INSERT INTO seq_events (event_id, timestamp, message_template, message, level, trace_id, span_id, user_id, guid_cotacao, service, environment, request_path, source_context, raw_data)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-         ON CONFLICT (event_id) DO NOTHING`,
-        [
-          parsed.event_id,
-          parsed.timestamp,
-          parsed.message_template,
-          parsed.message,
-          parsed.level,
-          parsed.trace_id,
-          parsed.span_id,
-          parsed.user_id,
-          parsed.guid_cotacao,
-          parsed.service,
-          parsed.environment,
-          parsed.request_path,
-          parsed.source_context,
-          JSON.stringify(parsed.raw_data),
-        ]
-      );
-      imported++;
-    } catch {
-      // skip duplicates
+    const hangMap = countBy(
+      accEvents.filter(e => e.source_context?.toLowerCase().includes("hangfire") && e.level !== "Information"),
+      e => e.message
+    );
+    const hangLast: Record<string, string> = {};
+    for (const e of accEvents.filter(e => e.source_context?.toLowerCase().includes("hangfire"))) {
+      if (e.message) hangLast[e.message] = e.timestamp;
     }
-  }
+    const hangfireFailures = topN(hangMap, 10).map(([message, count]) => ({
+      message, count: String(count), last_seen: hangLast[message] ?? "",
+    }));
 
-  res.json({ imported, message: `${imported} eventos de exemplo criados` });
+    const vehicleIps = new Set(
+      accEvents.flatMap(e => e.message?.match(/PocSag\s*:\s*([0-9.]+)/g)?.map(m => m.split(":").pop()?.trim()) ?? [])
+        .filter(Boolean)
+    );
+
+    const dbEvents  = accEvents.filter(e => e.source_context === "Microsoft.EntityFrameworkCore.Database.Command" && e.message?.match(/\d+ms/));
+    const slowEvents = dbEvents.filter(e => parseInt(e.message?.match(/(\d+)ms/)?.[1] ?? "0") > 500);
+    const maxMs = slowEvents.reduce((m, e) => Math.max(m, parseInt(e.message?.match(/(\d+)ms/)?.[1] ?? "0")), 0);
+
+    res.json({
+      authByEndpoint, bruteForce, anomalousUsernames,
+      topErrorEndpoints, criticalByContext, onlyEmptyGuidUsers,
+      swaggerEvidence, stackTraceEndpoints,
+      jwtInLogs: {
+        total: jwtEvents.length, uniqueTokens,
+        firstSeen: jwtEvents.at(-1)?.timestamp ?? null,
+        lastSeen:  jwtEvents.at(0)?.timestamp ?? null,
+      },
+      expiredCerts, dataProtectionUnencrypted, forwardedHeadersMismatch, efClientEval,
+      hangfireFailures, vehicleIpsExposed: vehicleIps.size,
+      slowQueries: { count: slowEvents.length, maxMs },
+    });
+  } catch (err) {
+    res.status(502).json({ error: String(err) });
+  }
+});
+
+// ── GET /:id ──────────────────────────────────────────────────────────────────
+router.get("/:id", (req: Request, res: Response) => {
+  const event = getEvents().find(e => e.event_id === req.params.id);
+  if (!event) { res.status(404).json({ error: "Evento não encontrado" }); return; }
+  res.json(toEvent(event, 0));
 });
 
 export default router;
