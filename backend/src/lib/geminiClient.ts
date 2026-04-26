@@ -1,28 +1,31 @@
 import https from "https";
 
 export async function geminiNarrative(prompt: string): Promise<string> {
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY || "";
+  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
   const body = JSON.stringify({
-    contents: [{ parts: [{ text: prompt }] }],
+    model: "claude-haiku-4-5-20251001",
+    max_tokens: 1024,
+    messages: [{ role: "user", content: prompt }],
   });
 
   return new Promise((resolve, reject) => {
-    const path = `/v1beta/models/gemini-2.0-flash:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
     const options: https.RequestOptions = {
-      hostname: "generativelanguage.googleapis.com",
-      path,
+      hostname: "api.anthropic.com",
+      path: "/v1/messages",
       method: "POST",
+      rejectUnauthorized: false,
       headers: {
-        "Content-Type":   "application/json",
-        "Content-Length": Buffer.byteLength(body),
+        "x-api-key":         ANTHROPIC_API_KEY,
+        "anthropic-version": "2023-06-01",
+        "Content-Type":      "application/json",
+        "Content-Length":    Buffer.byteLength(body),
       },
       timeout: 30000,
     };
 
     const req = https.request(options, (res) => {
-      // Detect corporate proxy block page (Forcepoint 302 redirect)
       if (res.statusCode === 302 || res.statusCode === 301) {
-        reject(new Error(`PROXY_BLOCKED: Gemini bloqueado pelo firewall corporativo (${res.statusCode} → ${res.headers.location ?? ""})`));
+        reject(new Error(`PROXY_BLOCKED: API bloqueada pelo firewall corporativo (${res.statusCode} → ${res.headers.location ?? ""})`));
         res.resume();
         return;
       }
@@ -36,22 +39,22 @@ export async function geminiNarrative(prompt: string): Promise<string> {
         try {
           const json = JSON.parse(data);
           if (json?.error) {
-            reject(new Error(`Gemini API error ${json.error.code}: ${json.error.message}`));
+            reject(new Error(`Anthropic API error ${json.error.type}: ${json.error.message}`));
             return;
           }
-          const text = (json?.candidates?.[0]?.content?.parts?.[0]?.text ?? "") as string;
+          const text = (json?.content?.[0]?.text ?? "") as string;
           if (!text) {
-            reject(new Error("Gemini retornou resposta vazia"));
+            reject(new Error("Claude retornou resposta vazia"));
             return;
           }
           resolve(text);
         } catch {
-          reject(new Error(`Gemini resposta inválida (status ${res.statusCode}): ${data.slice(0, 300)}`));
+          reject(new Error(`Anthropic resposta inválida (status ${res.statusCode}): ${data.slice(0, 300)}`));
         }
       });
     });
     req.on("error", reject);
-    req.on("timeout", () => { req.destroy(); reject(new Error("Gemini timeout")); });
+    req.on("timeout", () => { req.destroy(); reject(new Error("Anthropic timeout")); });
     req.write(body);
     req.end();
   });

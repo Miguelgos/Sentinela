@@ -477,9 +477,9 @@ Seja direto e objetivo. Evite jargão técnico excessivo.`;
     narrative = await geminiNarrative(prompt);
   } catch (err) {
     const msg = String(err);
-    console.error("[report] Gemini error:", msg);
+    console.error("[report] Claude error:", msg);
     narrativeError = msg.startsWith("Error: PROXY_BLOCKED")
-      ? "Gemini bloqueado pelo firewall corporativo (Forcepoint). Solicite ao TI o desbloqueio de generativelanguage.googleapis.com."
+      ? "API Claude bloqueada pelo firewall corporativo. Solicite ao TI o desbloqueio de api.anthropic.com."
       : `Análise automática indisponível: ${msg.replace(/^Error: /, "")}`;
     narrative = findings.length > 0
       ? `${narrativeError}\n\nAmeaças identificadas:\n${findings.map(f => `• [${f.risk}] ${f.title}`).join("\n")}`

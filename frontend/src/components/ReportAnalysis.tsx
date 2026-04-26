@@ -252,9 +252,9 @@ export function ReportAnalysis() {
       <div>
         <div className="flex items-center gap-2 mb-3">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
-            Análise IA — Gemini
+            Análise IA — Claude
           </p>
-          <Badge variant="secondary" className="text-xs">gemini-2.0-flash</Badge>
+          <Badge variant="secondary" className="text-xs">claude-haiku-4-5</Badge>
         </div>
         {data.narrativeError && (
           <div className="flex items-start gap-2 mb-3 rounded-md border border-yellow-700 bg-yellow-950/40 px-3 py-2 text-xs text-yellow-300">
