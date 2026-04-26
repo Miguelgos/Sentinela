@@ -20,15 +20,33 @@ export async function geminiNarrative(prompt: string): Promise<string> {
     };
 
     const req = https.request(options, (res) => {
+      // Detect corporate proxy block page (Forcepoint 302 redirect)
+      if (res.statusCode === 302 || res.statusCode === 301) {
+        reject(new Error(`PROXY_BLOCKED: Gemini bloqueado pelo firewall corporativo (${res.statusCode} → ${res.headers.location ?? ""})`));
+        res.resume();
+        return;
+      }
       let data = "";
       res.on("data", (c) => { data += c; });
       res.on("end", () => {
+        if (!data.trim()) {
+          reject(new Error("PROXY_BLOCKED: Resposta vazia — possível bloqueio de proxy"));
+          return;
+        }
         try {
           const json = JSON.parse(data);
+          if (json?.error) {
+            reject(new Error(`Gemini API error ${json.error.code}: ${json.error.message}`));
+            return;
+          }
           const text = (json?.candidates?.[0]?.content?.parts?.[0]?.text ?? "") as string;
+          if (!text) {
+            reject(new Error("Gemini retornou resposta vazia"));
+            return;
+          }
           resolve(text);
         } catch {
-          reject(new Error(`Gemini invalid response: ${data.slice(0, 300)}`));
+          reject(new Error(`Gemini resposta inválida (status ${res.statusCode}): ${data.slice(0, 300)}`));
         }
       });
     });

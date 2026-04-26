@@ -256,6 +256,12 @@ export function ReportAnalysis() {
           </p>
           <Badge variant="secondary" className="text-xs">gemini-2.0-flash</Badge>
         </div>
+        {data.narrativeError && (
+          <div className="flex items-start gap-2 mb-3 rounded-md border border-yellow-700 bg-yellow-950/40 px-3 py-2 text-xs text-yellow-300">
+            <AlertTriangle className="h-4 w-4 shrink-0 mt-0.5" />
+            <span>{data.narrativeError}</span>
+          </div>
+        )}
         <Card>
           <CardContent className="pt-4">
             <NarrativeSection text={data.narrative} />

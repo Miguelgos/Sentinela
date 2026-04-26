@@ -236,6 +236,7 @@ export interface ThreatReport {
   riskLevel: RiskLevel;
   findings: CorrelatedThreat[];
   narrative: string;
+  narrativeError?: string;
   sources: {
     seq:     { ok: boolean; events: number };
     datadog: { ok: boolean; alerts: number };

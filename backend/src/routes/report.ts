@@ -22,6 +22,7 @@ export interface ThreatReport {
   riskLevel: RiskLevel;
   findings: CorrelatedThreat[];
   narrative: string;
+  narrativeError?: string;
   sources: {
     seq:     { ok: boolean; events: number };
     datadog: { ok: boolean; alerts: number };
@@ -471,13 +472,18 @@ Estruture o relatório em 4 seções curtas:
 Seja direto e objetivo. Evite jargão técnico excessivo.`;
 
   let narrative = "";
+  let narrativeError: string | null = null;
   try {
     narrative = await geminiNarrative(prompt);
   } catch (err) {
-    console.error("[report] Gemini error:", err);
+    const msg = String(err);
+    console.error("[report] Gemini error:", msg);
+    narrativeError = msg.startsWith("Error: PROXY_BLOCKED")
+      ? "Gemini bloqueado pelo firewall corporativo (Forcepoint). Solicite ao TI o desbloqueio de generativelanguage.googleapis.com."
+      : `Análise automática indisponível: ${msg.replace(/^Error: /, "")}`;
     narrative = findings.length > 0
-      ? `Análise automática temporariamente indisponível.\n\nAmeaças identificadas:\n${findings.map(f => `• [${f.risk}] ${f.title}`).join("\n")}`
-      : "Análise automática temporariamente indisponível. Nenhuma ameaça crítica foi detectada no período analisado.";
+      ? `${narrativeError}\n\nAmeaças identificadas:\n${findings.map(f => `• [${f.risk}] ${f.title}`).join("\n")}`
+      : narrativeError;
   }
 
   const report: ThreatReport = {
@@ -485,6 +491,7 @@ Seja direto e objetivo. Evite jargão técnico excessivo.`;
     riskLevel:   overallRisk,
     findings,
     narrative,
+    ...(narrativeError ? { narrativeError } : {}),
     sources: {
       seq:     { ok: seqOk,  events:  seqEvents.length },
       datadog: { ok: ddOk,   alerts:  alertMonitors.length },
