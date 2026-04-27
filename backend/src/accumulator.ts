@@ -1,11 +1,29 @@
 import { seqHttpGet } from "./seq";
 import { SeqApiEvent, parseSeqApiEvent } from "./types";
-import { bulkInsert, loadAll, countEvents, oldestTimestamp, applyRetention, shouldStore } from "./db/sqlite";
 
 export type ParsedEvent = ReturnType<typeof parseSeqApiEvent>;
 
+// ── Noise sources descartadas em níveis não-críticos ─────────────────────────
+const NOISE_SOURCES = new Set([
+  "IdentityServer4.AccessTokenValidation.IdentityServerAuthenticationHandler",
+  "Microsoft.AspNetCore.HttpOverrides.ForwardedHeadersMiddleware",
+  "System.Net.Http.HttpClient.Default.LogicalHandler",
+  "System.Net.Http.HttpClient.Default.ClientHandler",
+  "Microsoft.AspNetCore.Routing.EndpointMiddleware",
+  "Microsoft.AspNetCore.Routing.EndpointRoutingMiddleware",
+  "Microsoft.AspNetCore.Hosting.Diagnostics",
+]);
+
+export function shouldStore(e: ParsedEvent): boolean {
+  if (e.level === "Error" || e.level === "Critical") return true;
+  if (e.source_context && NOISE_SOURCES.has(e.source_context)) return false;
+  return true;
+}
+
+const RETENTION_MS = 7 * 86_400_000;
+
 const _store = new Map<string, ParsedEvent>();
-let _latestSeqId: string | undefined; // Seq-internal Id do evento mais recente visto
+let _latestSeqId: string | undefined;
 let _ready = false;
 let _oldestTs: string | undefined;
 let _newestTs: string | undefined;
@@ -28,13 +46,33 @@ function addToStore(events: ParsedEvent[]): void {
   }
 }
 
+// ── Remove do Map eventos mais antigos que 7 dias e recalcula _oldestTs ───────
+function applyMapRetention(): void {
+  const cutoff = new Date(Date.now() - RETENTION_MS).toISOString();
+  let removed = 0;
+  for (const [id, e] of _store) {
+    if (e.timestamp < cutoff) {
+      _store.delete(id);
+      removed++;
+    }
+  }
+  if (removed > 0) {
+    // Recalcula _oldestTs após o trim
+    _oldestTs = undefined;
+    for (const e of _store.values()) {
+      if (!_oldestTs || e.timestamp < _oldestTs) _oldestTs = e.timestamp;
+    }
+    console.log(`[accumulator] retenção: -${removed} eventos > 7d (store: ${_store.size})`);
+  }
+}
+
 // ── Fetch paginado do Seq com fromDateUtc opcional ────────────────────────────
 async function fetchFromSeq(sinceDate?: Date, maxEvents = 500_000): Promise<{ events: ParsedEvent[]; firstId?: string }> {
   const PAGE = 1000;
   const SEQ_SIGNAL = process.env.SEQ_SIGNAL || "";
   const results: ParsedEvent[] = [];
   let afterId: string | undefined;
-  let firstId: string | undefined; // Id do evento mais recente (primeira página)
+  let firstId: string | undefined;
 
   while (results.length < maxEvents) {
     let qs = `?count=${PAGE}&render=true`;
@@ -45,7 +83,6 @@ async function fetchFromSeq(sinceDate?: Date, maxEvents = 500_000): Promise<{ ev
     const raw: SeqApiEvent[] = await seqHttpGet(`/api/events/${qs}`);
     if (raw.length === 0) break;
 
-    // Captura o Id Seq do evento mais novo (só na primeira página)
     if (!firstId && raw[0]?.Id) firstId = raw[0].Id;
 
     let done = false;
@@ -82,54 +119,37 @@ async function refresh(): Promise<void> {
 
   if (batch.length > 0) {
     addToStore(batch);
-    const inserted = bulkInsert(batch);
-    console.log(`[accumulator] +${batch.length} filtrados, ${inserted} novos no DB (store: ${_store.size})`);
+    console.log(`[accumulator] +${batch.length} novos (store: ${_store.size})`);
   }
 
   if (raw[0]?.Id) _latestSeqId = raw[0].Id;
+
+  applyMapRetention();
 }
 
 // ── Inicialização ─────────────────────────────────────────────────────────────
 export async function initAccumulator(): Promise<void> {
   try {
-    // 0. Retenção: remove eventos expirados antes de carregar
-    const { deletedA, deletedB } = applyRetention();
-    if (deletedA + deletedB > 0)
-      console.log(`[accumulator] retenção: -${deletedB} tier-B (>7d), -${deletedA} tier-A (>90d)`);
-
-    // 1. Carrega do SQLite (síncrono, imediato)
-    const sqliteEvents = loadAll();
-    addToStore(sqliteEvents);
-    if (sqliteEvents.length > 0) {
-      console.log(`[accumulator] SQLite: ${sqliteEvents.length} eventos (desde ${_oldestTs?.slice(0, 10)})`);
-    } else {
-      console.log("[accumulator] SQLite vazio — full sync do Seq");
-    }
-
-    // 2. Sync do Seq — só o que é mais novo que o que já temos
-    // Subtrai 1 min do _newestTs para garantir overlap e não perder eventos
-    const sinceDate = _newestTs
-      ? new Date(new Date(_newestTs).getTime() - 60_000)
-      : undefined;
+    // Full sync dos últimos 7 dias do Seq
+    const sinceDate = new Date(Date.now() - RETENTION_MS);
+    console.log(`[accumulator] full sync do Seq desde ${sinceDate.toISOString().slice(0, 10)}`);
 
     const { events: newEvents, firstId } = await fetchFromSeq(sinceDate);
 
     if (newEvents.length > 0) {
       addToStore(newEvents);
-      const inserted = bulkInsert(newEvents);
-      console.log(`[accumulator] Seq sync: ${newEvents.length} eventos, ${inserted} novos persistidos`);
+      console.log(`[accumulator] Seq sync: ${newEvents.length} eventos carregados`);
+    } else {
+      console.log("[accumulator] Seq sync concluído — nenhum evento no período");
     }
 
-    // Guarda o Seq Id mais recente para os polls futuros
     if (firstId) _latestSeqId = firstId;
 
   } catch (err) {
     console.error("[accumulator] erro na inicialização:", err);
   } finally {
     _ready = true;
-    const dbTotal  = countEvents();
-    const dbOldest = oldestTimestamp();
-    console.log(`[accumulator] pronto — store: ${_store.size} | DB: ${dbTotal} | desde: ${dbOldest?.slice(0, 10) ?? "?"}`);
+    console.log(`[accumulator] pronto — store: ${_store.size} | desde: ${_oldestTs?.slice(0, 10) ?? "?"}`);
   }
 
   setInterval(async () => {
