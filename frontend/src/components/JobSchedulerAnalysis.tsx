@@ -5,9 +5,18 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, RefreshCw, XCircle, Activity, Cpu } from "lucide-react";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend,
+  BarChart, Bar, XAxis, YAxis,
 } from "recharts";
+import {
+  ChartContainer, ChartTooltip, ChartTooltipContent,
+  ChartLegend, ChartLegendContent, type ChartConfig,
+} from "@/components/ui/chart";
 import { eventsApi, type GrafanaJobScheduler, type GrafanaProvider } from "@/lib/api";
+
+const jobSchedulerChartConfig = {
+  processed: { label: "Processados", color: "#3b82f6" },
+  errors:    { label: "Erros",        color: "#ef4444" },
+} satisfies ChartConfig;
 
 function errorRateColor(rate: number): string {
   if (rate > 10) return "text-red-400";
@@ -226,7 +235,7 @@ export function JobSchedulerAnalysis() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={chartHeight}>
+            <ChartContainer config={jobSchedulerChartConfig} style={{ height: chartHeight }} className="w-full">
               <BarChart data={chartData} layout="vertical">
                 <XAxis type="number" tick={{ fontSize: 9 }} />
                 <YAxis
@@ -235,22 +244,17 @@ export function JobSchedulerAnalysis() {
                   tick={{ fontSize: 8 }}
                   width={200}
                 />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: 6,
-                    fontSize: 11,
-                  }}
+                <ChartTooltip
+                  content={<ChartTooltipContent />}
                   labelFormatter={(_label, payload) =>
                     payload?.[0]?.payload?.fullName ?? _label
                   }
                 />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <ChartLegend content={<ChartLegendContent />} />
                 <Bar dataKey="processed" fill="#3b82f6" name="Processados" radius={[0, 3, 3, 0]} />
                 <Bar dataKey="errors" fill="#ef4444" name="Erros" radius={[0, 3, 3, 0]} />
               </BarChart>
-            </ResponsiveContainer>
+            </ChartContainer>
           </CardContent>
         </Card>
       )}

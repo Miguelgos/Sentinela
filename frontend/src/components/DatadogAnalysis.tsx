@@ -7,9 +7,47 @@ import {
   XCircle, HelpCircle, Database, Globe2, Cpu, Layers,
 } from "lucide-react";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, PieChart, Pie, Cell,
+  BarChart, Bar, XAxis, YAxis, PieChart, Pie, Cell,
 } from "recharts";
+import {
+  ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig,
+} from "@/components/ui/chart";
 import { eventsApi, type DatadogOverview, type DatadogMetrics, type DatadogInfra } from "@/lib/api";
+
+const datadogPieChartConfig = {
+  value: { label: "Monitores", color: "#3b82f6" },
+} satisfies ChartConfig;
+
+const datadogLogChartConfig = {
+  error: { label: "Error", color: "#dc2626" },
+  warn:  { label: "Warn",  color: "#ca8a04" },
+  info:  { label: "Info",  color: "#3b82f6" },
+} satisfies ChartConfig;
+
+const datadogCpuChartConfig = {
+  cpu: { label: "CPU %", color: "#10b981" },
+} satisfies ChartConfig;
+
+const datadogDiskChartConfig = {
+  diskPct: { label: "Disco %", color: "#f59e0b" },
+} satisfies ChartConfig;
+
+const datadogIisConnectionsChartConfig = {
+  connections: { label: "Conexões", color: "#06b6d4" },
+} satisfies ChartConfig;
+
+const datadogIisBySiteChartConfig = {
+  get:  { label: "GET",  color: "#3b82f6" },
+  post: { label: "POST", color: "#8b5cf6" },
+} satisfies ChartConfig;
+
+const datadogIisBytesChartConfig = {
+  kb: { label: "KB/s", color: "#a855f7" },
+} satisfies ChartConfig;
+
+const datadogIisErrorsChartConfig = {
+  notFound: { label: "404/s", color: "#ef4444" },
+} satisfies ChartConfig;
 import { formatDistanceToNow } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -296,16 +334,16 @@ export function DatadogAnalysis() {
             </CardHeader>
             <CardContent>
               <div className="flex items-center gap-4">
-                <ResponsiveContainer width={140} height={140}>
+                <ChartContainer config={datadogPieChartConfig} className="h-[140px] w-[140px]">
                   <PieChart>
                     <Pie data={typeData} cx="50%" cy="50%" innerRadius={35} outerRadius={60} dataKey="value" paddingAngle={2}>
                       {typeData.map((_, i) => (
                         <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />
                       ))}
                     </Pie>
-                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", fontSize: 11 }} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
                   </PieChart>
-                </ResponsiveContainer>
+                </ChartContainer>
                 <div className="space-y-1 text-xs flex-1">
                   {typeData.map((d, i) => (
                     <div key={d.name} className="flex items-center justify-between gap-2">
@@ -331,16 +369,16 @@ export function DatadogAnalysis() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={220}>
+              <ChartContainer config={datadogLogChartConfig} className="h-[220px] w-full">
                 <BarChart data={logChartData} layout="vertical">
                   <XAxis type="number" tick={{ fontSize: 9 }} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 9 }} width={115} />
-                  <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }} />
+                  <ChartTooltip content={<ChartTooltipContent />} />
                   <Bar dataKey="error" stackId="a" fill="#dc2626" name="Error" />
                   <Bar dataKey="warn"  stackId="a" fill="#ca8a04" name="Warn" />
                   <Bar dataKey="info"  stackId="a" fill="#3b82f6" name="Info" />
                 </BarChart>
-              </ResponsiveContainer>
+              </ChartContainer>
             </CardContent>
           </Card>
         )}
@@ -501,14 +539,14 @@ export function DatadogAnalysis() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={220}>
+                  <ChartContainer config={datadogCpuChartConfig} className="h-[220px] w-full">
                     <BarChart data={[...infra.cpu].sort((a, b) => b.cpu - a.cpu).slice(0, 10)} layout="vertical">
                       <XAxis type="number" tick={{ fontSize: 9 }} />
                       <YAxis type="category" dataKey="host" tick={{ fontSize: 9 }} width={130} />
-                      <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }} />
+                      <ChartTooltip content={<ChartTooltipContent />} />
                       <Bar dataKey="cpu" fill="#10b981" name="CPU %" radius={[0, 3, 3, 0]} />
                     </BarChart>
-                  </ResponsiveContainer>
+                  </ChartContainer>
                 </CardContent>
               </Card>
             )}
@@ -522,18 +560,18 @@ export function DatadogAnalysis() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={220}>
+                  <ChartContainer config={datadogDiskChartConfig} className="h-[220px] w-full">
                     <BarChart data={[...infra.disk].sort((a, b) => b.diskPct - a.diskPct)} layout="vertical">
                       <XAxis type="number" tick={{ fontSize: 9 }} />
                       <YAxis type="category" dataKey="host" tick={{ fontSize: 9 }} width={130} />
-                      <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }} />
+                      <ChartTooltip content={<ChartTooltipContent />} />
                       <Bar dataKey="diskPct" name="Disco %" radius={[0, 3, 3, 0]}>
                         {[...infra.disk].sort((a, b) => b.diskPct - a.diskPct).map((d, i) => (
                           <Cell key={i} fill={d.diskPct > 85 ? "#ef4444" : "#f59e0b"} />
                         ))}
                       </Bar>
                     </BarChart>
-                  </ResponsiveContainer>
+                  </ChartContainer>
                 </CardContent>
               </Card>
             )}
@@ -664,14 +702,14 @@ export function DatadogAnalysis() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={180}>
+                <ChartContainer config={datadogIisConnectionsChartConfig} className="h-[180px] w-full">
                   <BarChart data={metrics.iis.connections} layout="vertical">
                     <XAxis type="number" tick={{ fontSize: 9 }} />
                     <YAxis type="category" dataKey="host" tick={{ fontSize: 9 }} width={130} />
-                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
                     <Bar dataKey="connections" fill="#06b6d4" name="Conexões" radius={[0, 3, 3, 0]} />
                   </BarChart>
-                </ResponsiveContainer>
+                </ChartContainer>
               </CardContent>
             </Card>
 
@@ -683,15 +721,15 @@ export function DatadogAnalysis() {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <ResponsiveContainer width="100%" height={180}>
+                <ChartContainer config={datadogIisBySiteChartConfig} className="h-[180px] w-full">
                   <BarChart data={metrics.iis.bySite.slice(0, 10)} layout="vertical">
                     <XAxis type="number" tick={{ fontSize: 9 }} />
                     <YAxis type="category" dataKey="site" tick={{ fontSize: 8 }} width={130} />
-                    <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }} />
+                    <ChartTooltip content={<ChartTooltipContent />} />
                     <Bar dataKey="get"  stackId="a" fill="#3b82f6" name="GET" />
                     <Bar dataKey="post" stackId="a" fill="#8b5cf6" name="POST" radius={[0, 3, 3, 0]} />
                   </BarChart>
-                </ResponsiveContainer>
+                </ChartContainer>
               </CardContent>
             </Card>
 
@@ -704,14 +742,14 @@ export function DatadogAnalysis() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={180}>
+                  <ChartContainer config={datadogIisBytesChartConfig} className="h-[180px] w-full">
                     <BarChart data={metrics.iis.bytes.map(h => ({ ...h, kb: +(h.bytes / 1024).toFixed(1) }))} layout="vertical">
                       <XAxis type="number" tick={{ fontSize: 9 }} />
                       <YAxis type="category" dataKey="host" tick={{ fontSize: 9 }} width={130} />
-                      <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }} />
+                      <ChartTooltip content={<ChartTooltipContent />} />
                       <Bar dataKey="kb" fill="#a855f7" name="KB/s" radius={[0, 3, 3, 0]} />
                     </BarChart>
-                  </ResponsiveContainer>
+                  </ChartContainer>
                 </CardContent>
               </Card>
             )}
@@ -725,14 +763,14 @@ export function DatadogAnalysis() {
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
-                  <ResponsiveContainer width="100%" height={180}>
+                  <ChartContainer config={datadogIisErrorsChartConfig} className="h-[180px] w-full">
                     <BarChart data={metrics.iis.errors.filter(h => h.notFound > 0)} layout="vertical">
                       <XAxis type="number" tick={{ fontSize: 9 }} />
                       <YAxis type="category" dataKey="host" tick={{ fontSize: 9 }} width={130} />
-                      <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }} />
+                      <ChartTooltip content={<ChartTooltipContent />} />
                       <Bar dataKey="notFound" fill="#ef4444" name="404/s" radius={[0, 3, 3, 0]} />
                     </BarChart>
-                  </ResponsiveContainer>
+                  </ChartContainer>
                 </CardContent>
               </Card>
             )}

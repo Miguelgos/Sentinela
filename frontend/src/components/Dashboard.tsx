@@ -5,9 +5,12 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, Activity, Bug, Users, Hash, ShieldAlert, FileDown } from "lucide-react";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
+  BarChart, Bar, XAxis, YAxis,
   PieChart, Pie, Cell,
 } from "recharts";
+import {
+  ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig,
+} from "@/components/ui/chart";
 import { eventsApi, pessoaApi, type StatsSummary, type TimelineEntry, type AuthErrorStats } from "@/lib/api";
 import { EMPTY_GUID } from "@/lib/utils";
 import { format } from "date-fns";
@@ -21,6 +24,19 @@ const COLORS = {
   Fatal: "#dc2626",
   Verbose: "#9ca3af",
 };
+
+const dashboardTimelineChartConfig = {
+  Error:       { label: "Error",       color: "#ef4444" },
+  Warning:     { label: "Warning",     color: "#f59e0b" },
+  Information: { label: "Information", color: "#3b82f6" },
+  Debug:       { label: "Debug",       color: "#6b7280" },
+  Fatal:       { label: "Fatal",       color: "#dc2626" },
+  Verbose:     { label: "Verbose",     color: "#9ca3af" },
+} satisfies ChartConfig;
+
+const dashboardPieChartConfig = {
+  value: { label: "Eventos", color: "#3b82f6" },
+} satisfies ChartConfig;
 
 export function Dashboard() {
   const [stats, setStats] = useState<StatsSummary | null>(null);
@@ -126,19 +142,16 @@ export function Dashboard() {
             <CardTitle className="text-sm font-medium">Timeline — Últimas 24h</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
+            <ChartContainer config={dashboardTimelineChartConfig} className="h-[200px] w-full">
               <BarChart data={timelineData}>
                 <XAxis dataKey="hour" tick={{ fontSize: 10 }} />
                 <YAxis tick={{ fontSize: 10 }} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6 }}
-                  labelStyle={{ color: "hsl(var(--foreground))" }}
-                />
+                <ChartTooltip content={<ChartTooltipContent />} />
                 {Object.keys(COLORS).map((level) => (
                   <Bar key={level} dataKey={level} stackId="a" fill={COLORS[level as keyof typeof COLORS]} />
                 ))}
               </BarChart>
-            </ResponsiveContainer>
+            </ChartContainer>
           </CardContent>
         </Card>
 
@@ -147,16 +160,16 @@ export function Dashboard() {
             <CardTitle className="text-sm font-medium">Distribuição por Nível</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
+            <ChartContainer config={dashboardPieChartConfig} className="h-[200px] w-full">
               <PieChart>
                 <Pie data={pieData} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`} labelLine={false} fontSize={10}>
                   {pieData.map((entry) => (
                     <Cell key={entry.name} fill={COLORS[entry.name as keyof typeof COLORS] || "#6b7280"} />
                   ))}
                 </Pie>
-                <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))" }} />
+                <ChartTooltip content={<ChartTooltipContent />} />
               </PieChart>
-            </ResponsiveContainer>
+            </ChartContainer>
           </CardContent>
         </Card>
       </div>

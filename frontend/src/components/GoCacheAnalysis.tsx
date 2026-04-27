@@ -4,10 +4,36 @@ import { Badge } from "@/components/ui/badge";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Shield, AlertTriangle, Bot, Globe, XCircle, Flame } from "lucide-react";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer,
-  LineChart, Line, CartesianGrid, Legend, Cell,
+  BarChart, Bar, XAxis, YAxis,
+  LineChart, Line, CartesianGrid, Cell,
 } from "recharts";
+import {
+  ChartContainer, ChartTooltip, ChartTooltipContent,
+  ChartLegend, ChartLegendContent, type ChartConfig,
+} from "@/components/ui/chart";
 import { eventsApi, type GoCacheEvent, type GoCacheOverview } from "@/lib/api";
+
+const goCacheAlertChartConfig = {
+  count: { label: "Bloqueios", color: "#dc2626" },
+} satisfies ChartConfig;
+
+const goCacheUriChartConfig = {
+  count: { label: "Ataques", color: "#ea580c" },
+} satisfies ChartConfig;
+
+const goCacheTimelineChartConfig = {
+  waf:      { label: "WAF",      color: "#dc2626" },
+  bot:      { label: "Bot",      color: "#a855f7" },
+  firewall: { label: "Firewall", color: "#ea580c" },
+} satisfies ChartConfig;
+
+const goCacheCategoryChartConfig = {
+  count: { label: "Eventos", color: "#dc2626" },
+} satisfies ChartConfig;
+
+const goCacheCountryChartConfig = {
+  count: { label: "Eventos", color: "#3b82f6" },
+} satisfies ChartConfig;
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -227,16 +253,14 @@ export function GoCacheAnalysis() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={220}>
+              <ChartContainer config={goCacheAlertChartConfig} className="h-[220px] w-full">
                 <BarChart data={alertChartData} layout="vertical">
                   <XAxis type="number" tick={{ fontSize: 9 }} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 8 }} width={170} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }}
-                  />
+                  <ChartTooltip content={<ChartTooltipContent />} />
                   <Bar dataKey="count" fill="#dc2626" name="Bloqueios" radius={[0,3,3,0]} />
                 </BarChart>
-              </ResponsiveContainer>
+              </ChartContainer>
             </CardContent>
           </Card>
         )}
@@ -251,16 +275,14 @@ export function GoCacheAnalysis() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={220}>
+              <ChartContainer config={goCacheUriChartConfig} className="h-[220px] w-full">
                 <BarChart data={uriChartData} layout="vertical">
                   <XAxis type="number" tick={{ fontSize: 9 }} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 8 }} width={170} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }}
-                  />
+                  <ChartTooltip content={<ChartTooltipContent />} />
                   <Bar dataKey="count" fill="#ea580c" name="Ataques" radius={[0,3,3,0]} />
                 </BarChart>
-              </ResponsiveContainer>
+              </ChartContainer>
             </CardContent>
           </Card>
         )}
@@ -344,20 +366,18 @@ export function GoCacheAnalysis() {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={240}>
+            <ChartContainer config={goCacheTimelineChartConfig} className="h-[240px] w-full">
               <LineChart data={timelineData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis dataKey="hour" tick={{ fontSize: 10 }} />
                 <YAxis tick={{ fontSize: 10 }} />
-                <Tooltip
-                  contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }}
-                />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartLegend content={<ChartLegendContent />} />
                 <Line type="monotone" dataKey="waf"      name="WAF"      stroke="#dc2626" strokeWidth={2} dot={false} />
                 <Line type="monotone" dataKey="bot"      name="Bot"      stroke="#a855f7" strokeWidth={2} dot={false} />
                 <Line type="monotone" dataKey="firewall" name="Firewall" stroke="#ea580c" strokeWidth={2} dot={false} />
               </LineChart>
-            </ResponsiveContainer>
+            </ChartContainer>
           </CardContent>
         </Card>
       )}
@@ -373,20 +393,18 @@ export function GoCacheAnalysis() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={240}>
+              <ChartContainer config={goCacheCategoryChartConfig} className="h-[240px] w-full">
                 <BarChart data={categoryChartData} layout="vertical">
                   <XAxis type="number" tick={{ fontSize: 9 }} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={130} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }}
-                  />
+                  <ChartTooltip content={<ChartTooltipContent />} />
                   <Bar dataKey="count" name="Eventos" radius={[0,3,3,0]}>
                     {categoryChartData.map((entry, i) => (
                       <Cell key={i} fill={entry.fill} />
                     ))}
                   </Bar>
                 </BarChart>
-              </ResponsiveContainer>
+              </ChartContainer>
             </CardContent>
           </Card>
         )}
@@ -401,16 +419,14 @@ export function GoCacheAnalysis() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={240}>
+              <ChartContainer config={goCacheCountryChartConfig} className="h-[240px] w-full">
                 <BarChart data={countryChartData} layout="vertical">
                   <XAxis type="number" tick={{ fontSize: 9 }} />
                   <YAxis type="category" dataKey="name" tick={{ fontSize: 10 }} width={60} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6, fontSize: 11 }}
-                  />
+                  <ChartTooltip content={<ChartTooltipContent />} />
                   <Bar dataKey="count" fill="#3b82f6" name="Eventos" radius={[0,3,3,0]} />
                 </BarChart>
-              </ResponsiveContainer>
+              </ChartContainer>
             </CardContent>
           </Card>
         )}

@@ -5,9 +5,16 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, RefreshCw, XCircle, CheckCircle, Layers } from "lucide-react";
 import {
-  BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell,
+  BarChart, Bar, XAxis, YAxis, Cell,
 } from "recharts";
+import {
+  ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig,
+} from "@/components/ui/chart";
 import { eventsApi, type GrafanaKubernetes, type GrafanaPod, type GrafanaAlert } from "@/lib/api";
+
+const kubernetesCpuChartConfig = {
+  cpu: { label: "CPU %", color: "#22c55e" },
+} satisfies ChartConfig;
 
 function podShortName(name: string): string {
   const parts = name.split("-");
@@ -278,7 +285,7 @@ export function KubernetesAnalysis() {
           </CardHeader>
           <CardContent className="space-y-4">
             {/* CPU Bar Chart */}
-            <ResponsiveContainer width="100%" height={chartHeight}>
+            <ChartContainer config={kubernetesCpuChartConfig} style={{ height: chartHeight }} className="w-full">
               <BarChart data={cpuChartData} layout="vertical">
                 <XAxis type="number" tick={{ fontSize: 9 }} domain={[0, 100]} unit="%" />
                 <YAxis
@@ -287,13 +294,8 @@ export function KubernetesAnalysis() {
                   tick={{ fontSize: 9 }}
                   width={60}
                 />
-                <Tooltip
-                  contentStyle={{
-                    backgroundColor: "hsl(var(--card))",
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: 6,
-                    fontSize: 11,
-                  }}
+                <ChartTooltip
+                  content={<ChartTooltipContent />}
                   formatter={(value: number) => [`${value}%`, "CPU"]}
                   labelFormatter={(_label, payload) =>
                     payload?.[0]?.payload?.fullName ?? _label
@@ -305,7 +307,7 @@ export function KubernetesAnalysis() {
                   ))}
                 </Bar>
               </BarChart>
-            </ResponsiveContainer>
+            </ChartContainer>
 
             {/* Pod table */}
             <div className="overflow-x-auto">

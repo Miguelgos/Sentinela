@@ -7,12 +7,20 @@ import { EventDetail } from "@/components/EventDetail";
 import { ShieldAlert, Clock, Users, TrendingUp, User, FileDown } from "lucide-react";
 import { exportAuthErrorPdf } from "@/lib/exportPdf";
 import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid,
 } from "recharts";
+import {
+  ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig,
+} from "@/components/ui/chart";
 import { eventsApi, type AuthErrorStats } from "@/lib/api";
 import { formatTimestamp } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
+
+const authErrorChartConfig = {
+  erros:    { label: "Falhas",          color: "#ef4444" },
+  usuarios: { label: "Usuários únicos", color: "#a855f7" },
+} satisfies ChartConfig;
 
 function extractEmail(msg: string) {
   return msg.match(/User:\s*(\S+)\s*\|/)?.[1] || "—";
@@ -128,7 +136,7 @@ export function AuthErrorAnalysis() {
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <ResponsiveContainer width="100%" height={200}>
+              <ChartContainer config={authErrorChartConfig} className="h-[200px] w-full">
                 <AreaChart data={chartData}>
                   <defs>
                     <linearGradient id="authErrGrad" x1="0" y1="0" x2="0" y2="1">
@@ -139,13 +147,11 @@ export function AuthErrorAnalysis() {
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="hora" tick={{ fontSize: 10 }} />
                   <YAxis tick={{ fontSize: 10 }} />
-                  <Tooltip
-                    contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6 }}
-                  />
+                  <ChartTooltip content={<ChartTooltipContent />} />
                   <Area type="monotone" dataKey="erros" stroke="#ef4444" fill="url(#authErrGrad)" name="Falhas" />
                   <Area type="monotone" dataKey="usuarios" stroke="#a855f7" fill="transparent" strokeDasharray="4 2" name="Usuários únicos" />
                 </AreaChart>
-              </ResponsiveContainer>
+              </ChartContainer>
             </CardContent>
           </Card>
         )}

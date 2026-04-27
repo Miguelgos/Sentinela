@@ -7,9 +7,18 @@ import {
   ShieldAlert, Globe, Server, User, Wifi, FileDown,
 } from "lucide-react";
 import {
-  AreaChart, Area, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, Legend,
+  AreaChart, Area, XAxis, YAxis, CartesianGrid,
 } from "recharts";
+import {
+  ChartContainer, ChartTooltip, ChartTooltipContent,
+  ChartLegend, ChartLegendContent, type ChartConfig,
+} from "@/components/ui/chart";
 import { eventsApi, type KongAuthStats } from "@/lib/api";
+
+const kongChartConfig = {
+  sucessos: { label: "Sucesso (200)", color: "#22c55e" },
+  falhas:   { label: "Falha (≠200)",  color: "#ef4444" },
+} satisfies ChartConfig;
 import { exportKongAuthPdf } from "@/lib/exportPdf";
 import { formatTimestamp } from "@/lib/utils";
 import { format } from "date-fns";
@@ -175,7 +184,7 @@ export function KongAuthAnalysis() {
             <CardTitle className="text-sm font-medium">Timeline — Kong Auth por hora</CardTitle>
           </CardHeader>
           <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
+            <ChartContainer config={kongChartConfig} className="h-[200px] w-full">
               <AreaChart data={chartData}>
                 <defs>
                   <linearGradient id="kongFail" x1="0" y1="0" x2="0" y2="1">
@@ -190,12 +199,12 @@ export function KongAuthAnalysis() {
                 <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                 <XAxis dataKey="hora" tick={{ fontSize: 10 }} />
                 <YAxis tick={{ fontSize: 10 }} />
-                <Tooltip contentStyle={{ backgroundColor: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 6 }} />
-                <Legend wrapperStyle={{ fontSize: 11 }} />
+                <ChartTooltip content={<ChartTooltipContent />} />
+                <ChartLegend content={<ChartLegendContent />} />
                 <Area type="monotone" dataKey="sucessos" stroke="#22c55e" fill="url(#kongOk)" name="Sucesso (200)" />
                 <Area type="monotone" dataKey="falhas" stroke="#ef4444" fill="url(#kongFail)" name="Falha (≠200)" />
               </AreaChart>
-            </ResponsiveContainer>
+            </ChartContainer>
           </CardContent>
         </Card>
       )}
