@@ -38,7 +38,6 @@ export function LoginPage({ onSignIn, onSignInWithMicrosoft }: Props) {
     setMsLoading(true);
     const { error: err } = await onSignInWithMicrosoft();
     if (err) { setError(err.message); setMsLoading(false); }
-    // sem erro: browser redireciona para Microsoft, spinner fica ativo
   }
 
   return (
@@ -59,98 +58,107 @@ export function LoginPage({ onSignIn, onSignInWithMicrosoft }: Props) {
       />
 
       <div className="relative w-full max-w-sm">
-        {/* Logo */}
-        <div className="flex flex-col items-center mb-8">
-          <SentinelaLogo className="w-56 rounded-lg" />
-          <p className="text-[11px] text-[#0077C2] tracking-[0.25em] font-semibold mt-2 uppercase">
-            Ituran · Security Analytics
-          </p>
-        </div>
-
-        {/* Card */}
+        {/* Single unified card */}
         <div
-          className="rounded-2xl border border-[#1a3a6a] p-7 shadow-2xl"
-          style={{ background: "rgba(10, 18, 40, 0.85)", backdropFilter: "blur(12px)" }}
+          className="rounded-2xl border border-[#1a3a6a] shadow-2xl overflow-hidden"
+          style={{ background: "rgba(10, 18, 40, 0.90)", backdropFilter: "blur(16px)" }}
         >
-          <h2 className="text-sm font-semibold text-white mb-5">Acesso restrito</h2>
-
-          {/* Microsoft SSO */}
-          <button
-            type="button"
-            onClick={handleMicrosoft}
-            disabled={msLoading}
-            className="w-full flex items-center justify-center gap-3 rounded-lg border border-[#1e3a6a] bg-white px-4 py-2.5 text-sm font-semibold text-[#1a1a1a] hover:bg-gray-100 disabled:opacity-60 transition-colors mb-5"
+          {/* Logo section — topo do card, sem borda separada */}
+          <div
+            className="flex flex-col items-center pt-9 pb-7 px-7"
+            style={{
+              background: "linear-gradient(180deg, rgba(0,119,194,0.10) 0%, transparent 100%)",
+              borderBottom: "1px solid rgba(26,58,106,0.5)",
+            }}
           >
-            {msLoading ? (
-              <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#1a1a1a] border-t-transparent" />
-            ) : (
-              <MicrosoftIcon />
-            )}
-            {msLoading ? "Redirecionando…" : "Entrar com Microsoft"}
-          </button>
-
-          <div className="relative mb-5">
-            <div className="absolute inset-0 flex items-center">
-              <span className="w-full border-t border-[#1e3a6a]" />
-            </div>
-            <div className="relative flex justify-center text-[11px]">
-              <span className="bg-[#050d20] px-3 text-slate-500">ou com e-mail</span>
-            </div>
+            <SentinelaLogo className="w-52 rounded-lg" />
+            <p className="text-[11px] text-[#0077C2] tracking-[0.25em] font-semibold mt-2 uppercase">
+              Ituran · Security Analytics
+            </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div className="space-y-1.5">
-              <label className="text-xs text-slate-400 font-medium">E-mail</label>
-              <input
-                type="email"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                className="w-full rounded-lg border border-[#1e3a6a] bg-[#050d1f] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-[#0077C2] transition-shadow"
-                placeholder="usuario@ituran.com.br"
-              />
-            </div>
+          {/* Form section */}
+          <div className="px-7 py-6">
+            <h2 className="text-sm font-semibold text-white mb-5">Acesso restrito</h2>
 
-            <div className="space-y-1.5">
-              <label className="text-xs text-slate-400 font-medium">Senha</label>
-              <input
-                type="password"
-                autoComplete="current-password"
-                required
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                className="w-full rounded-lg border border-[#1e3a6a] bg-[#050d1f] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-[#0077C2] transition-shadow"
-                placeholder="••••••••"
-              />
-            </div>
-
-            {error && (
-              <div className="flex items-start gap-2 rounded-lg border border-red-900/60 bg-red-950/40 px-3 py-2.5">
-                <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-red-500" />
-                <p className="text-xs text-red-400 leading-relaxed">{error}</p>
-              </div>
-            )}
-
+            {/* Microsoft SSO */}
             <button
-              type="submit"
-              disabled={loading}
-              className="w-full rounded-lg bg-[#0077C2] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0066a8] disabled:opacity-50 transition-colors shadow-lg shadow-[#0077C2]/20 mt-1"
+              type="button"
+              onClick={handleMicrosoft}
+              disabled={msLoading}
+              className="w-full flex items-center justify-center gap-3 rounded-lg border border-[#1e3a6a] bg-white px-4 py-2.5 text-sm font-semibold text-[#1a1a1a] hover:bg-gray-100 disabled:opacity-60 transition-colors mb-5"
             >
-              {loading ? (
-                <span className="flex items-center justify-center gap-2">
-                  <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
-                  Entrando…
-                </span>
+              {msLoading ? (
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-[#1a1a1a] border-t-transparent" />
               ) : (
-                "Entrar"
+                <MicrosoftIcon />
               )}
+              {msLoading ? "Redirecionando…" : "Entrar com Microsoft"}
             </button>
-          </form>
+
+            <div className="relative mb-5">
+              <div className="absolute inset-0 flex items-center">
+                <span className="w-full border-t border-[#1e3a6a]" />
+              </div>
+              <div className="relative flex justify-center text-[11px]">
+                <span className="bg-[#070f24] px-3 text-slate-500">ou com e-mail</span>
+              </div>
+            </div>
+
+            <form onSubmit={handleSubmit} className="space-y-4">
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-400 font-medium">E-mail</label>
+                <input
+                  type="email"
+                  autoComplete="email"
+                  required
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  className="w-full rounded-lg border border-[#1e3a6a] bg-[#050d1f] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-[#0077C2] transition-shadow"
+                  placeholder="usuario@ituran.com.br"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs text-slate-400 font-medium">Senha</label>
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  className="w-full rounded-lg border border-[#1e3a6a] bg-[#050d1f] px-3 py-2.5 text-sm text-white placeholder:text-slate-600 focus:outline-none focus:ring-2 focus:ring-[#0077C2] transition-shadow"
+                  placeholder="••••••••"
+                />
+              </div>
+
+              {error && (
+                <div className="flex items-start gap-2 rounded-lg border border-red-900/60 bg-red-950/40 px-3 py-2.5">
+                  <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-red-500" />
+                  <p className="text-xs text-red-400 leading-relaxed">{error}</p>
+                </div>
+              )}
+
+              <button
+                type="submit"
+                disabled={loading}
+                className="w-full rounded-lg bg-[#0077C2] px-4 py-2.5 text-sm font-semibold text-white hover:bg-[#0066a8] disabled:opacity-50 transition-colors shadow-lg shadow-[#0077C2]/20 mt-1"
+              >
+                {loading ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <span className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                    Entrando…
+                  </span>
+                ) : (
+                  "Entrar"
+                )}
+              </button>
+            </form>
+          </div>
         </div>
 
         {/* Bottom label */}
-        <p className="text-center text-[11px] text-slate-600 mt-6 tracking-wide">
+        <p className="text-center text-[11px] text-slate-600 mt-5 tracking-wide">
           Uso exclusivo Ituran — acesso monitorado
         </p>
       </div>
