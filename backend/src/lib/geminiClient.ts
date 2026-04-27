@@ -1,24 +1,27 @@
 import https from "https";
 
 export async function geminiNarrative(prompt: string): Promise<string> {
-  const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || "";
+  const endpoint   = process.env.AZURE_OPENAI_ENDPOINT   || "";
+  const apiKey     = process.env.AZURE_OPENAI_KEY        || "";
+  const deployment = process.env.AZURE_OPENAI_DEPLOYMENT || "sentinela";
+
   const body = JSON.stringify({
-    model: "claude-haiku-4-5-20251001",
-    max_tokens: 1024,
-    messages: [{ role: "user", content: prompt }],
+    model:                 deployment,
+    messages:              [{ role: "user", content: prompt }],
+    max_completion_tokens: 1024,
   });
 
   return new Promise((resolve, reject) => {
+    const url = new URL(endpoint);
     const options: https.RequestOptions = {
-      hostname: "api.anthropic.com",
-      path: "/v1/messages",
-      method: "POST",
+      hostname:           url.hostname,
+      path:               url.pathname + url.search,
+      method:             "POST",
       rejectUnauthorized: false,
       headers: {
-        "x-api-key":         ANTHROPIC_API_KEY,
-        "anthropic-version": "2023-06-01",
-        "Content-Type":      "application/json",
-        "Content-Length":    Buffer.byteLength(body),
+        "api-key":       apiKey,
+        "Content-Type":  "application/json",
+        "Content-Length": Buffer.byteLength(body),
       },
       timeout: 30000,
     };
@@ -39,22 +42,22 @@ export async function geminiNarrative(prompt: string): Promise<string> {
         try {
           const json = JSON.parse(data);
           if (json?.error) {
-            reject(new Error(`Anthropic API error ${json.error.type}: ${json.error.message}`));
+            reject(new Error(`Azure OpenAI error: ${json.error.message}`));
             return;
           }
-          const text = (json?.content?.[0]?.text ?? "") as string;
+          const text = (json?.choices?.[0]?.message?.content ?? "") as string;
           if (!text) {
-            reject(new Error("Claude retornou resposta vazia"));
+            reject(new Error("Azure OpenAI retornou resposta vazia"));
             return;
           }
           resolve(text);
         } catch {
-          reject(new Error(`Anthropic resposta inválida (status ${res.statusCode}): ${data.slice(0, 300)}`));
+          reject(new Error(`Azure OpenAI resposta inválida (status ${res.statusCode}): ${data.slice(0, 300)}`));
         }
       });
     });
     req.on("error", reject);
-    req.on("timeout", () => { req.destroy(); reject(new Error("Anthropic timeout")); });
+    req.on("timeout", () => { req.destroy(); reject(new Error("Azure OpenAI timeout")); });
     req.write(body);
     req.end();
   });
