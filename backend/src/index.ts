@@ -9,6 +9,7 @@ import datadogRouter from "./routes/datadog";
 import gocacheRouter from "./routes/gocache";
 import reportRouter from "./routes/report";
 import grafanaRouter from "./routes/grafana";
+import auditRouter from "./routes/audit";
 import { initAccumulator } from "./accumulator";
 
 const app = express();
@@ -23,6 +24,7 @@ app.use("/api/datadog", datadogRouter);
 app.use("/api/gocache", gocacheRouter);
 app.use("/api/report",  reportRouter);
 app.use("/api/grafana", grafanaRouter);
+app.use("/api/audit",   auditRouter);
 
 app.get("/api/health", (_req, res) => res.json({ status: "ok", timestamp: new Date().toISOString() }));
 

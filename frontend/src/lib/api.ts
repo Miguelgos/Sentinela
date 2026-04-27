@@ -189,6 +189,38 @@ export interface PessoaStats {
   empty_guid: number;
 }
 
+export interface AuditOverview {
+  totals: { service: string; events: number }[];
+  topPages: { service: string; page: string; count: number }[];
+  topUsers: {
+    service: string;
+    userId: string;
+    count: number;
+    maskedAccess: number;
+  }[];
+  maskedDataAccess: { userId: string; service: string; count: number }[];
+  externalIPs: {
+    ip: string;
+    userId: string;
+    page: string;
+    timestamp: string;
+  }[];
+  suspiciousUsers: {
+    userId: string;
+    service: string;
+    count: number;
+    uniquePages: number;
+  }[];
+  recentEvents: {
+    timestamp: string;
+    service: string;
+    userId: string;
+    ip: string;
+    page: string;
+    masked: boolean;
+  }[];
+}
+
 export const eventsApi = {
   list: (filters: EventFilters = {}) =>
     api.get<EventsResponse>("/events", { params: filters }).then((r) => r.data),
@@ -221,6 +253,8 @@ export const eventsApi = {
 
   grafanaKubernetes: () => api.get<GrafanaKubernetes>("/grafana/kubernetes").then(r => r.data),
   grafanaJobScheduler: () => api.get<GrafanaJobScheduler>("/grafana/jobscheduler").then(r => r.data),
+
+  auditOverview: () => api.get<AuditOverview>("/audit/overview").then(r => r.data),
 };
 
 export interface GrafanaPod {

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LayoutDashboard, List, AlertTriangle, ShieldAlert, ShieldCheck, Globe, BarChart2, Flame, FileWarning, Layers, Cpu } from "lucide-react";
+import { LayoutDashboard, List, AlertTriangle, ShieldAlert, ShieldCheck, Globe, BarChart2, Flame, FileWarning, Layers, Cpu, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { Dashboard } from "@/components/Dashboard";
@@ -13,9 +13,10 @@ import { GoCacheAnalysis } from "@/components/GoCacheAnalysis";
 import { ReportAnalysis } from "@/components/ReportAnalysis";
 import { KubernetesAnalysis } from "@/components/KubernetesAnalysis";
 import { JobSchedulerAnalysis } from "@/components/JobSchedulerAnalysis";
+import { AuditAnalysis } from "@/components/AuditAnalysis";
 import { SentinelaLogo } from "@/components/SentinelaLogo";
 
-type Page = "dashboard" | "logs" | "analysis" | "auth-errors" | "security" | "kong-auth" | "datadog" | "gocache" | "report" | "kubernetes" | "jobscheduler";
+type Page = "dashboard" | "logs" | "analysis" | "auth-errors" | "security" | "kong-auth" | "datadog" | "gocache" | "report" | "kubernetes" | "jobscheduler" | "audit";
 
 const NAV = [
   { id: "dashboard"   as Page, label: "Dashboard",              icon: LayoutDashboard },
@@ -29,6 +30,7 @@ const NAV = [
   { id: "report"       as Page, label: "Relatório de Ameaças",   icon: FileWarning },
   { id: "kubernetes"   as Page, label: "Kubernetes",             icon: Layers },
   { id: "jobscheduler" as Page, label: "JobScheduler",           icon: Cpu },
+  { id: "audit"        as Page, label: "Auditoria",              icon: Eye },
 ];
 
 export default function App() {
@@ -46,6 +48,7 @@ export default function App() {
     report:       "Relatório de Ameaças Cibernéticas",
     kubernetes:   "Kubernetes — Saúde do Cluster",
     jobscheduler: "JobScheduler — Execução de Jobs",
+    audit:        "Auditoria — Logs de Acesso",
   };
 
   return (
@@ -53,7 +56,7 @@ export default function App() {
       <aside className="w-56 border-r flex flex-col py-4 shrink-0">
         <div className="px-3 mb-4">
           <SentinelaLogo className="w-full rounded-md" />
-          <p className="text-xs text-muted-foreground text-center mt-1.5">Ituran · salesbo</p>
+          <p className="text-xs text-muted-foreground text-center mt-1.5">Ituran · Integra</p>
         </div>
         <Separator className="mb-2" />
         <nav className="flex-1 px-2 space-y-1">
@@ -75,7 +78,6 @@ export default function App() {
         </nav>
         <div className="px-4 pt-2 border-t">
           <p className="text-xs text-muted-foreground">integra-prd</p>
-          <p className="text-xs text-muted-foreground">salesbo</p>
         </div>
       </aside>
 
@@ -95,6 +97,7 @@ export default function App() {
           {page === "report"       && <ReportAnalysis />}
           {page === "kubernetes"   && <KubernetesAnalysis />}
           {page === "jobscheduler" && <JobSchedulerAnalysis />}
+          {page === "audit"        && <AuditAnalysis />}
         </div>
       </main>
     </div>
