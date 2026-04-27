@@ -73,9 +73,9 @@ SQL Server (banco espelho)
     → Dashboard, LogsTable, AuditAnalysis (exibe nm_pessoa)
 
 app/server/fn/report.ts
-  → Coleta dados das 4 fontes (Seq + Datadog + GoCache + Grafana)
-  → 14 regras de correlação
-  → Azure OpenAI (narrativa executiva)
+  → Coleta dados das 5 fontes (Seq + Datadog + GoCache + Grafana + Loki auditoria)
+  → 15 regras de correlação (ecossistema completo integra-prd)
+  → Azure OpenAI (narrativa executiva genérica — sem referência a serviço específico)
     → ReportAnalysis.tsx → exportThreatReportPdf
 ```
 

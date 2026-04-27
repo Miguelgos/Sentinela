@@ -151,24 +151,27 @@ AZURE_OPENAI_DEPLOYMENT=sentinela
 
 ## Regras de correlação do Relatório de Ameaças
 
-O servidor `app/server/fn/report.ts` cruza dados de Seq, Datadog, GoCache e Grafana com 14 regras:
+O servidor `app/server/fn/report.ts` cruza dados de Seq, Datadog, GoCache, Grafana e Loki (auditoria) com 15 regras, cobrindo o ecossistema completo da plataforma `integra-prd`:
 
-| Regra | Descrição |
-|-------|-----------|
-| `BRUTE_FORCE` | ≥5 falhas de autenticação em janela de 10 min por usuário |
-| `WAF_INJECTION` | Ataques SQLi/XSS bloqueados pelo WAF GoCache |
-| `MULTI_SOURCE_IP` | IPs presentes tanto no GoCache quanto nos logs do Seq |
-| `DATADOG_ALERT` | Monitores Datadog em estado Alert ou Warn |
-| `HIGH_ERROR_RATE` | >50 eventos Error/Critical na última hora |
-| `ACTIVE_INCIDENT` | Incidentes não resolvidos no Datadog |
-| `SCANNER_DETECTED` | Ferramentas ofensivas (SQLMap, Nikto, Dart) detectadas no WAF |
-| `BOT_ATTACK` | >100 bloqueios de bots em 24h |
-| `INFRA_STRESS` | CPU >85%, disco >90% ou reinicializações de pods |
-| `GEO_CONCENTRATION` | Concentração de ataques em países de alto risco (CN, RU, KP, IR) |
-| `PROMETHEUS_ALERT` | Alertas críticos ou >3 warnings no Alertmanager/Grafana |
-| `DEPLOYMENT_DOWN` | Deployments com 0 réplicas no namespace `integra-prd` |
+| Regra | Fonte | Descrição |
+|-------|-------|-----------|
+| `BRUTE_FORCE` | Seq | ≥5 falhas de autenticação em janela de 10 min por usuário |
+| `WAF_INJECTION` | GoCache | Ataques SQLi/XSS bloqueados pelo WAF |
+| `MULTI_SOURCE_IP` | GoCache + Seq | IPs presentes tanto no WAF quanto nos logs de aplicação |
+| `DATADOG_ALERT` | Datadog | Monitores em estado Alert ou Warn |
+| `HIGH_ERROR_RATE` | Seq | >50 eventos Error/Critical na última hora |
+| `ACTIVE_INCIDENT` | Datadog | Incidentes não resolvidos |
+| `SCANNER_DETECTED` | GoCache | Ferramentas ofensivas (SQLMap, Nikto, Dart) no WAF |
+| `BOT_ATTACK` | GoCache | >100 bloqueios de bots em 24h |
+| `INFRA_STRESS` | Datadog | CPU >85%, disco >90% ou reinicializações de pods |
+| `GEO_CONCENTRATION` | GoCache | Concentração de ataques em países de alto risco (CN, RU, KP, IR) |
+| `PROMETHEUS_ALERT` | Grafana | Alertas críticos ou >3 warnings no Alertmanager |
+| `DEPLOYMENT_DOWN` | Grafana | Deployments com 0 réplicas no namespace `integra-prd` |
+| `AUDIT_ANOMALY` | Loki | >30 acessos a dados reais (desmascarados) ou usuário com volume anômalo |
+| `EXTERNAL_AUDIT_IP` | Loki | IPs externos detectados nos logs de auditoria dos serviços |
+| `SLO_BREACH` | Datadog | SLO com <10% de budget de erros restante |
 
-A narrativa executiva (~400 palavras, 4 seções) é gerada pelo Azure OpenAI (deployment `sentinela`). Em caso de indisponibilidade, um resumo estático dos achados é retornado como fallback.
+A narrativa executiva (~400 palavras, 4 seções) é gerada por IA (Azure OpenAI, deployment `sentinela`). Em caso de indisponibilidade, um resumo estático dos achados é retornado como fallback.
 
 ## Exportação PDF
 
