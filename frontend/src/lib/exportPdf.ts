@@ -141,7 +141,7 @@ function header(doc: jsPDF, title: string, subtitle = "Ituran · integra-prd · 
 }
 
 function footers(doc: jsPDF, label: string, n: string) {
-  const pageCount = (doc.internal as { getNumberOfPages: () => number }).getNumberOfPages();
+  const pageCount = (doc.internal as unknown as { getNumberOfPages: () => number }).getNumberOfPages();
   for (let i = 1; i <= pageCount; i++) {
     doc.setPage(i);
     doc.setFontSize(7);
