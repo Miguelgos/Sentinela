@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LayoutDashboard, List, AlertTriangle, ShieldAlert, ShieldCheck, Globe, BarChart2, Flame, FileWarning } from "lucide-react";
+import { LayoutDashboard, List, AlertTriangle, ShieldAlert, ShieldCheck, Globe, BarChart2, Flame, FileWarning, Layers, Cpu } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { Dashboard } from "@/components/Dashboard";
@@ -11,9 +11,11 @@ import { KongAuthAnalysis } from "@/components/KongAuthAnalysis";
 import { DatadogAnalysis } from "@/components/DatadogAnalysis";
 import { GoCacheAnalysis } from "@/components/GoCacheAnalysis";
 import { ReportAnalysis } from "@/components/ReportAnalysis";
+import { KubernetesAnalysis } from "@/components/KubernetesAnalysis";
+import { JobSchedulerAnalysis } from "@/components/JobSchedulerAnalysis";
 import { SentinelaLogo } from "@/components/SentinelaLogo";
 
-type Page = "dashboard" | "logs" | "analysis" | "auth-errors" | "security" | "kong-auth" | "datadog" | "gocache" | "report";
+type Page = "dashboard" | "logs" | "analysis" | "auth-errors" | "security" | "kong-auth" | "datadog" | "gocache" | "report" | "kubernetes" | "jobscheduler";
 
 const NAV = [
   { id: "dashboard"   as Page, label: "Dashboard",              icon: LayoutDashboard },
@@ -23,8 +25,10 @@ const NAV = [
   { id: "kong-auth"   as Page, label: "Kong Auth",              icon: Globe },
   { id: "security"    as Page, label: "Segurança",              icon: ShieldCheck },
   { id: "datadog"     as Page, label: "Datadog",                icon: BarChart2 },
-  { id: "gocache"     as Page, label: "GoCache WAF",            icon: Flame },
-  { id: "report"      as Page, label: "Relatório de Ameaças",   icon: FileWarning },
+  { id: "gocache"      as Page, label: "GoCache WAF",            icon: Flame },
+  { id: "report"       as Page, label: "Relatório de Ameaças",   icon: FileWarning },
+  { id: "kubernetes"   as Page, label: "Kubernetes",             icon: Layers },
+  { id: "jobscheduler" as Page, label: "JobScheduler",           icon: Cpu },
 ];
 
 export default function App() {
@@ -40,6 +44,8 @@ export default function App() {
     datadog:      "Datadog — Infraestrutura & Monitores",
     gocache:      "GoCache WAF — Proteção & Ataques",
     report:       "Relatório de Ameaças Cibernéticas",
+    kubernetes:   "Kubernetes — Saúde do Cluster",
+    jobscheduler: "JobScheduler — Execução de Jobs",
   };
 
   return (
@@ -85,8 +91,10 @@ export default function App() {
           {page === "kong-auth"   && <KongAuthAnalysis />}
           {page === "security"    && <SecurityAnalysis />}
           {page === "datadog"     && <DatadogAnalysis />}
-          {page === "gocache"     && <GoCacheAnalysis />}
-          {page === "report"      && <ReportAnalysis />}
+          {page === "gocache"      && <GoCacheAnalysis />}
+          {page === "report"       && <ReportAnalysis />}
+          {page === "kubernetes"   && <KubernetesAnalysis />}
+          {page === "jobscheduler" && <JobSchedulerAnalysis />}
         </div>
       </main>
     </div>

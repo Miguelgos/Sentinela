@@ -218,7 +218,56 @@ export const eventsApi = {
   datadogMetrics: () => api.get<DatadogMetrics>("/datadog/metrics").then((r) => r.data),
 
   datadogInfra: () => api.get<DatadogInfra>("/datadog/infra").then((r) => r.data),
+
+  grafanaKubernetes: () => api.get<GrafanaKubernetes>("/grafana/kubernetes").then(r => r.data),
+  grafanaJobScheduler: () => api.get<GrafanaJobScheduler>("/grafana/jobscheduler").then(r => r.data),
 };
+
+export interface GrafanaPod {
+  name: string;
+  cpuPct: number;
+  memMb: number;
+  restarts: number;
+}
+
+export interface GrafanaAlert {
+  name: string;
+  severity: string;
+  namespace: string;
+  state: string;
+  labels: Record<string, string>;
+}
+
+export interface GrafanaKubernetes {
+  salesbo: {
+    replicas: { available: number; desired: number };
+    totalCpuPct: number;
+    totalMemGb: number;
+    pods: GrafanaPod[];
+  };
+  deploymentsDown: string[];
+  podRestarts: { pod: string; restarts: number }[];
+  alerts: GrafanaAlert[];
+}
+
+export interface GrafanaProvider {
+  name: string;
+  processed: number;
+  errors: number;
+  errorsLastHour: number;
+  errorRate: number;
+  avgDurationMs: number;
+  activeRequests: number;
+}
+
+export interface GrafanaJobScheduler {
+  providers: GrafanaProvider[];
+  totals: {
+    processed: number;
+    errors: number;
+    errorRate: number;
+  };
+}
 
 export type RiskLevel = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";
 
