@@ -14,9 +14,9 @@ import {
 import { LevelBadge } from "@/components/LevelBadge";
 import { EventDetail } from "@/components/EventDetail";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Search, ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
+import { Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { eventsApi, pessoaApi, type DbEvent, type EventsResponse, type EventFilters } from "@/lib/api";
-import { formatTimestamp, isEmptyGuid, truncate } from "@/lib/utils";
+import { formatTimestamp, truncate } from "@/lib/utils";
 
 const columnHelper = createColumnHelper<DbEvent>();
 
@@ -90,22 +90,6 @@ export function LogsTable() {
         );
       },
     }),
-    columnHelper.accessor("guid_cotacao", {
-      header: "GUID Cotação",
-      cell: (info) => {
-        const guid = info.getValue() as string | null;
-        if (!guid) return <span className="text-xs">—</span>;
-        if (isEmptyGuid(guid)) {
-          return (
-            <span className="text-red-400 font-mono flex items-center gap-1 text-xs">
-              <AlertTriangle className="h-3 w-3" />
-              vazio
-            </span>
-          );
-        }
-        return <span className="font-mono text-muted-foreground text-xs">{guid.slice(0, 8)}…</span>;
-      },
-    }),
   ];
 
   const table = useReactTable<DbEvent>({
@@ -152,16 +136,6 @@ export function LogsTable() {
                 <SelectItem value="Debug">Debug</SelectItem>
               </SelectContent>
             </Select>
-
-            <Button
-              size="sm"
-              variant={filters.emptyGuidOnly ? "default" : "outline"}
-              onClick={() => setFilter("emptyGuidOnly", !filters.emptyGuidOnly || undefined)}
-              className="h-9 gap-1"
-            >
-              <AlertTriangle className="h-3 w-3" />
-              GUID vazio
-            </Button>
 
             <Button
               size="sm"

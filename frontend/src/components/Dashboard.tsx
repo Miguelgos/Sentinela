@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, Activity, Bug, Users, Hash, ShieldAlert, FileDown } from "lucide-react";
+import { AlertTriangle, Activity, Users, Hash, ShieldAlert, FileDown } from "lucide-react";
 import {
   BarChart, Bar, XAxis, YAxis,
   PieChart, Pie, Cell,
@@ -12,7 +12,6 @@ import {
   ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig,
 } from "@/components/ui/chart";
 import { eventsApi, pessoaApi, type StatsSummary, type TimelineEntry, type AuthErrorStats } from "@/lib/api";
-import { EMPTY_GUID } from "@/lib/utils";
 import { format } from "date-fns";
 import { exportDashboardPdf } from "@/lib/exportPdf";
 
@@ -70,11 +69,6 @@ export function Dashboard() {
   if (loading) return <DashboardSkeleton />;
   if (!stats) return null;
 
-  const emptyGuid = parseInt(stats.guidBreakdown?.empty_guid || "0");
-  const validGuid = parseInt(stats.guidBreakdown?.valid_guid || "0");
-  const totalWithGuid = emptyGuid + validGuid;
-  const emptyPct = totalWithGuid > 0 ? ((emptyGuid / totalWithGuid) * 100).toFixed(1) : "0";
-
   const pieData = stats.byLevel.map((l) => ({
     name: l.level,
     value: parseInt(l.count),
@@ -98,7 +92,7 @@ export function Dashboard() {
           {exporting ? "Gerando PDF…" : "Exportar PDF"}
         </Button>
       </div>
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-4">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard
           title="Total de Eventos"
           value={stats.total.toLocaleString("pt-BR")}
@@ -111,14 +105,6 @@ export function Dashboard() {
           icon={<AlertTriangle className="h-5 w-5 text-red-400" />}
           color="border-red-500/30"
           alert={stats.errors > 0}
-        />
-        <StatCard
-          title="GUID Vazio"
-          value={emptyGuid.toLocaleString("pt-BR")}
-          subtitle={`${emptyPct}% das cotações`}
-          icon={<Bug className="h-5 w-5 text-orange-400" />}
-          color="border-orange-500/30"
-          alert={emptyGuid > 0}
         />
         <StatCard
           title="Falhas de Auth"
@@ -175,24 +161,6 @@ export function Dashboard() {
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <Card className="border-orange-500/30">
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium flex items-center gap-2">
-              <Bug className="h-4 w-4 text-orange-400" />
-              GUID Cotação — Quote/PrintItens
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-3">
-            <div className="rounded-lg bg-orange-500/10 border border-orange-500/20 p-3 text-sm text-orange-300">
-              <strong>{emptyPct}%</strong> das requisições chegam com GUID vazio (<code>{EMPTY_GUID}</code>), indicando que o frontend aciona o endpoint sem um ID de cotação válido.
-            </div>
-            <div className="space-y-2">
-              <GuidRow label="GUID vazio (erro)" value={emptyGuid} total={totalWithGuid} color="bg-red-500" />
-              <GuidRow label="GUID válido" value={validGuid} total={totalWithGuid} color="bg-green-500" />
-            </div>
-          </CardContent>
-        </Card>
-
         <Card className="border-red-500/30">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
@@ -312,21 +280,6 @@ function StatCard({
         </div>
       </CardContent>
     </Card>
-  );
-}
-
-function GuidRow({ label, value, total, color }: { label: string; value: number; total: number; color: string }) {
-  const pct = total > 0 ? (value / total) * 100 : 0;
-  return (
-    <div>
-      <div className="flex justify-between text-xs mb-1">
-        <span>{label}</span>
-        <span>{value.toLocaleString("pt-BR")} ({pct.toFixed(1)}%)</span>
-      </div>
-      <div className="h-2 bg-muted rounded-full">
-        <div className={`h-2 ${color} rounded-full`} style={{ width: `${pct}%` }} />
-      </div>
-    </div>
   );
 }
 

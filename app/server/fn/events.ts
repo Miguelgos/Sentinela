@@ -2,7 +2,6 @@
 import { createServerFn } from "@tanstack/react-start";
 import { fetchSeq, prop, truncHour } from "../../../backend/src/seq";
 import { getEvents, isReady, storeSize, storeCoverage } from "../../../backend/src/accumulator";
-import { EMPTY_GUID } from "../../../backend/src/types";
 import type { EventFilters } from "../../../frontend/src/lib/api";
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -15,7 +14,6 @@ type SerializedEvent = {
   level: string;
   trace_id: string | null;
   user_id: string | null;
-  guid_cotacao: string | null;
   service: string | null;
   environment: string | null;
   request_path: string | null;
@@ -32,7 +30,6 @@ function toEvent(e: ReturnType<typeof getEvents>[number], idx: number): Serializ
     level: e.level,
     trace_id: e.trace_id,
     user_id: e.user_id,
-    guid_cotacao: e.guid_cotacao,
     service: e.service,
     environment: e.environment,
     request_path: e.request_path,
@@ -74,13 +71,12 @@ export const getEventsStatus = createServerFn({ method: "GET" }).handler(async (
 export const listEvents = createServerFn({ method: "GET" })
   .inputValidator((input: EventFilters) => input)
   .handler(async ({ data }) => {
-    const { level, search = "", emptyGuidOnly = false, page = 1, pageSize = 50 } = data;
+    const { level, search = "", page = 1, pageSize = 50 } = data;
     const searchLower = search.toLowerCase();
 
     let events = getEvents();
-    if (level)         events = events.filter(e => e.level === level);
-    if (emptyGuidOnly) events = events.filter(e => e.guid_cotacao === EMPTY_GUID);
-    if (searchLower)   events = events.filter(e => e.message?.toLowerCase().includes(searchLower));
+    if (level)       events = events.filter(e => e.level === level);
+    if (searchLower) events = events.filter(e => e.message?.toLowerCase().includes(searchLower));
 
     const total      = events.length;
     const safePage   = Math.max(1, page);
@@ -121,20 +117,7 @@ export const getStatsSummary = createServerFn({ method: "GET" }).handler(async (
   const serviceMap  = countBy(events.filter(e => e.service), e => e.service);
   const topServices = topN(serviceMap, 10).map(([service, count]) => ({ service, count: String(count) }));
 
-  const relevant   = events.filter(e => e.guid_cotacao != null || e.request_path?.toLowerCase().includes("printitens") || e.request_path?.toLowerCase().includes("quote"));
-  const empty_guid = relevant.filter(e => e.guid_cotacao === EMPTY_GUID).length;
-  const valid_guid = relevant.filter(e => e.guid_cotacao && e.guid_cotacao !== EMPTY_GUID).length;
-  const no_guid    = relevant.filter(e => !e.guid_cotacao).length;
-
-  return {
-    total, errors, byLevel, topErrors, topUsers, topServices,
-    guidBreakdown: {
-      empty_guid: String(empty_guid),
-      valid_guid: String(valid_guid),
-      no_guid: String(no_guid),
-      total_with_cotacao: String(relevant.length),
-    },
-  };
+  return { total, errors, byLevel, topErrors, topUsers, topServices };
 });
 
 // ── getTimeline ───────────────────────────────────────────────────────────────
@@ -161,30 +144,6 @@ export const getTimeline = createServerFn({ method: "GET" })
     }
     return result;
   });
-
-// ── getEmptyGuidTimeline ──────────────────────────────────────────────────────
-
-export const getEmptyGuidTimeline = createServerFn({ method: "GET" }).handler(async () => {
-  const events = await fetchSeq({
-    filter:   "RequestPath = '/Quote/GetSimpleQuote'",
-    maxTotal: 10000,
-  });
-  const empty = events.filter(e => e.guid_cotacao === EMPTY_GUID);
-
-  const map: Record<string, { count: number; users: Set<string> }> = {};
-  for (const e of empty) {
-    const h = truncHour(e.timestamp);
-    if (!map[h]) map[h] = { count: 0, users: new Set() };
-    map[h].count++;
-    if (e.user_id) map[h].users.add(e.user_id);
-  }
-
-  return Object.keys(map).sort().map(h => ({
-    hour:         h,
-    count:        String(map[h].count),
-    unique_users: String(map[h].users.size),
-  }));
-});
 
 // ── getAuthErrorStats ─────────────────────────────────────────────────────────
 
@@ -324,20 +283,7 @@ export const getSecurityStats = createServerFn({ method: "GET" }).handler(async 
     source_context, count: String(count), last_seen: ctxLast[source_context] ?? "",
   }));
 
-  // 6. Users with only empty GUIDs
-  const quoteEvents = accEvents.filter(e => e.guid_cotacao != null || e.request_path?.toLowerCase().includes("quote"));
-  const emptyGuidUsers = new Set(quoteEvents.filter(e => e.guid_cotacao === EMPTY_GUID && e.user_id).map(e => e.user_id!));
-  const validGuidUsers = new Set(quoteEvents.filter(e => e.guid_cotacao && e.guid_cotacao !== EMPTY_GUID && e.user_id).map(e => e.user_id!));
-  const onlyEmptyGuidUsers = [...emptyGuidUsers]
-    .filter(u => !validGuidUsers.has(u))
-    .map(u => ({
-      user_id: u,
-      empty_guid_calls: String(quoteEvents.filter(e => e.user_id === u && e.guid_cotacao === EMPTY_GUID).length),
-    }))
-    .sort((a, b) => parseInt(b.empty_guid_calls) - parseInt(a.empty_guid_calls))
-    .slice(0, 10);
-
-  // 7. Swagger in production
+  // 6. Swagger in production
   const swaggerEvidence = accEvents.filter(e =>
     e.message?.toLowerCase().includes("swaggermiddleware") || e.message?.toLowerCase().includes("swaggerui")
   ).length;
@@ -412,7 +358,7 @@ export const getSecurityStats = createServerFn({ method: "GET" }).handler(async 
 
   return {
     authByEndpoint, bruteForce, anomalousUsernames,
-    topErrorEndpoints, criticalByContext, onlyEmptyGuidUsers,
+    topErrorEndpoints, criticalByContext,
     swaggerEvidence, stackTraceEndpoints,
     jwtInLogs: {
       total: jwtEvents.length, uniqueTokens,

@@ -4,7 +4,6 @@ import {
   getEvent,
   getStatsSummary,
   getTimeline,
-  getEmptyGuidTimeline,
   getAuthErrorStats,
   getSecurityStats,
   getKongAuthStats,
@@ -33,7 +32,6 @@ export interface DbEvent {
   level: string;
   trace_id: string | null;
   user_id: string | null;
-  guid_cotacao: string | null;
   service: string | null;
   environment: string | null;
   request_path: string | null;
@@ -52,7 +50,6 @@ export interface EventsResponse {
 export interface EventFilters {
   level?: string;
   search?: string;
-  emptyGuidOnly?: boolean;
   page?: number;
   pageSize?: number;
 }
@@ -63,12 +60,6 @@ export interface StatsSummary {
   byLevel: { level: string; count: string }[];
   topErrors: { message: string; count: string }[];
   topUsers: { user_id: string; count: string }[];
-  guidBreakdown: {
-    empty_guid: string;
-    valid_guid: string;
-    no_guid: string;
-    total_with_cotacao: string;
-  };
   topServices: { service: string; count: string }[];
 }
 
@@ -84,7 +75,6 @@ export interface SecurityStats {
   anomalousUsernames: { username: string; attempts: string }[];
   topErrorEndpoints: { request_path: string; level: string; count: string }[];
   criticalByContext: { source_context: string; count: string; last_seen: string }[];
-  onlyEmptyGuidUsers: { user_id: string; empty_guid_calls: string }[];
   swaggerEvidence: number;
   stackTraceEndpoints: { request_path: string; count: string }[];
   jwtInLogs: { total: number; uniqueTokens: number; firstSeen: string | null; lastSeen: string | null };
@@ -209,7 +199,6 @@ export interface PessoaStats {
   nm_pessoa: string | null;
   total: number;
   errors: number;
-  empty_guid: number;
 }
 
 export interface AuditOverview {
@@ -321,7 +310,6 @@ export const eventsApi = {
   get:                (id: string)                  => getEvent({ data: { id } }),
   stats:              ()                            => getStatsSummary(),
   timeline:           (hours?: number)              => getTimeline({ data: { hours } }),
-  emptyGuidTimeline:  ()                            => getEmptyGuidTimeline(),
   authErrorStats:     ()                            => getAuthErrorStats(),
   securityStats:      ()                            => getSecurityStats(),
   kongAuthStats:      ()                            => getKongAuthStats(),

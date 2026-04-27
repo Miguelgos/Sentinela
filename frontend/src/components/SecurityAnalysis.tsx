@@ -144,7 +144,6 @@ function SecurityContent({ stats }: { stats: SecurityStats }) {
     medium: [
       stats.hangfireFailures.length > 0,
       stats.anomalousUsernames.length > 0,
-      stats.onlyEmptyGuidUsers.length > 0,
       stats.vehicleIpsExposed > 0,
       stats.slowQueries.count > 0,
     ].filter(Boolean).length,
@@ -424,24 +423,6 @@ function SecurityContent({ stats }: { stats: SecurityStats }) {
               </div>
             ))}
           </div>
-        </FindingCard>
-      )}
-
-      {/* SEC-006: 100% GUID vazio */}
-      {stats.onlyEmptyGuidUsers.length > 0 && (
-        <FindingCard
-          id="SEC-006" sev="medium"
-          title={`${stats.onlyEmptyGuidUsers.length} usuário(s) com 100% de chamadas com GUID vazio`}
-          icon={<Hash className="h-4 w-4" />}
-          action="Investigar via lookup cd_pessoa quem são esses usuários. Verificar se são contas de teste, integradoras ou clientes com bug de cliente específico."
-        >
-          <MiniTable
-            headers={["UserId", "Chamadas com GUID vazio"]}
-            rows={stats.onlyEmptyGuidUsers.map((r) => [
-              <span className="font-mono">#{r.user_id}</span>,
-              <Badge variant="error">{r.empty_guid_calls}</Badge>,
-            ])}
-          />
         </FindingCard>
       )}
 

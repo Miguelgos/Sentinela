@@ -1,10 +1,9 @@
 import { useState } from "react";
-import { LayoutDashboard, List, AlertTriangle, ShieldAlert, ShieldCheck, Globe, BarChart2, Flame, FileWarning, Layers, Cpu, Eye } from "lucide-react";
+import { LayoutDashboard, List, ShieldAlert, ShieldCheck, Globe, BarChart2, Flame, FileWarning, Layers, Cpu, Eye } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { Dashboard } from "@/components/Dashboard";
 import { LogsTable } from "@/components/LogsTable";
-import { ErrorAnalysis } from "@/components/ErrorAnalysis";
 import { AuthErrorAnalysis } from "@/components/AuthErrorAnalysis";
 import { SecurityAnalysis } from "@/components/SecurityAnalysis";
 import { KongAuthAnalysis } from "@/components/KongAuthAnalysis";
@@ -16,12 +15,11 @@ import { JobSchedulerAnalysis } from "@/components/JobSchedulerAnalysis";
 import { AuditAnalysis } from "@/components/AuditAnalysis";
 import { SentinelaLogo } from "@/components/SentinelaLogo";
 
-type Page = "dashboard" | "logs" | "analysis" | "auth-errors" | "security" | "kong-auth" | "datadog" | "gocache" | "report" | "kubernetes" | "jobscheduler" | "audit";
+type Page = "dashboard" | "logs" | "auth-errors" | "security" | "kong-auth" | "datadog" | "gocache" | "report" | "kubernetes" | "jobscheduler" | "audit";
 
 const NAV = [
   { id: "dashboard"   as Page, label: "Dashboard",              icon: LayoutDashboard },
   { id: "logs"        as Page, label: "Eventos",                icon: List },
-  { id: "analysis"    as Page, label: "GUID Cotação vazio",     icon: AlertTriangle },
   { id: "auth-errors" as Page, label: "Falhas de Autenticação", icon: ShieldAlert },
   { id: "kong-auth"   as Page, label: "Kong Auth",              icon: Globe },
   { id: "security"    as Page, label: "Segurança",              icon: ShieldCheck },
@@ -39,7 +37,6 @@ export default function App() {
   const PageTitle: Record<Page, string> = {
     dashboard:    "Dashboard",
     logs:         "Eventos",
-    analysis:     "Análise — GUID Cotação vazio",
     "auth-errors":"Análise — Falhas de Autenticação",
     "kong-auth":  "Análise — Kong Auth Request",
     security:     "Análise de Segurança",
@@ -88,7 +85,6 @@ export default function App() {
         <div className="p-6">
           {page === "dashboard"   && <Dashboard />}
           {page === "logs"        && <LogsTable />}
-          {page === "analysis"    && <ErrorAnalysis />}
           {page === "auth-errors" && <AuthErrorAnalysis />}
           {page === "kong-auth"   && <KongAuthAnalysis />}
           {page === "security"    && <SecurityAnalysis />}

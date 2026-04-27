@@ -5,7 +5,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { LevelBadge } from "@/components/LevelBadge";
 import { type DbEvent } from "@/lib/api";
-import { formatTimestamp, isEmptyGuid } from "@/lib/utils";
+import { formatTimestamp } from "@/lib/utils";
 
 interface Props {
   event: DbEvent | null;
@@ -32,16 +32,6 @@ export function EventDetail({ event, onClose }: Props) {
               <Field label="Serviço" value={event.service} />
               <Field label="Ambiente" value={event.environment} />
               <Field label="UserId" value={event.user_id} />
-              <Field label="GUID Cotação">
-                {event.guid_cotacao ? (
-                  <span className={isEmptyGuid(event.guid_cotacao) ? "text-red-400 font-mono" : "font-mono"}>
-                    {event.guid_cotacao}
-                    {isEmptyGuid(event.guid_cotacao) && (
-                      <Badge variant="error" className="ml-2 text-xs">GUID vazio</Badge>
-                    )}
-                  </span>
-                ) : "—"}
-              </Field>
               <Field label="Trace ID" value={event.trace_id} mono />
               <Field label="Source" value={event.source_context} />
             </div>

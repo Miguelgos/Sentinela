@@ -296,18 +296,10 @@ export function exportDashboardPdf(
   const doc = createDoc();
   const { startY, now: n } = header(doc, "Dashboard — Resumo de Eventos");
 
-  const emptyGuid = parseInt(stats.guidBreakdown?.empty_guid || "0");
-  const validGuid = parseInt(stats.guidBreakdown?.valid_guid || "0");
-  const total = emptyGuid + validGuid;
-  const emptyPct = total > 0 ? ((emptyGuid / total) * 100).toFixed(1) : "0";
-
   let y = summaryBox(doc, startY, [
     ["Total de Eventos",  stats.total.toLocaleString("pt-BR")],
     ["Erros",            stats.errors.toLocaleString("pt-BR"), RED],
     ["Falhas de Auth",   (authStats?.total ?? 0).toLocaleString("pt-BR"), ORANGE],
-    ["GUID vazio",       emptyGuid.toLocaleString("pt-BR"), ORANGE],
-    ["GUID valido",      validGuid.toLocaleString("pt-BR"), GREEN],
-    ["Taxa GUID vazio",  `${emptyPct}%`, emptyPct > "10" ? RED : ORANGE],
   ]);
 
   // By level
@@ -367,64 +359,6 @@ export function exportDashboardPdf(
 
   footers(doc, "Dashboard", n);
   doc.save(`dashboard-${stamp()}.pdf`);
-}
-
-// ── GUID vazio ─────────────────────────────────────────────────────────────
-export function exportErrorAnalysisPdf(
-  events: { total: number; data: { id: string | number; timestamp: string; user_id: string | null; level: string; message: string | null; request_path: string | null }[] },
-  timeline: { hour: string; count: string; unique_users: string }[],
-  names: Record<string, string>,
-) {
-  const doc = createDoc();
-  const { startY, now: n } = header(doc, "Análise — GUID Cotação Vazio");
-
-  const uniqueUsers = new Set(events.data.map((e) => e.user_id).filter(Boolean)).size;
-  const peak = timeline.reduce((m, t) => parseInt(t.count) > parseInt(m.count) ? t : m,
-    { hour: "", count: "0", unique_users: "0" });
-
-  let y = summaryBox(doc, startY, [
-    ["Total de Erros",    events.total.toLocaleString("pt-BR"), RED],
-    ["Usuários afetados", uniqueUsers.toLocaleString("pt-BR"), ORANGE],
-    ["Pico (hora)",       `${peak.count} erros`, ORANGE],
-  ]);
-
-  // Context note
-  doc.setFontSize(8);
-  doc.setTextColor(GRAY);
-  doc.setFont("helvetica", "italic");
-  doc.text(
-    "Endpoint Quote/PrintItens chamado com GUID_COTACAO zerado — frontend dispara impressão antes de obter cotação válida.",
-    14, y, { maxWidth: 182 }
-  );
-  doc.setFont("helvetica", "normal");
-  doc.setTextColor("#000000");
-  y += 12;
-
-  // Timeline
-  if (timeline.length > 0) {
-    y = checkPage(doc, y, 40);
-    y = section(doc, y, "Timeline — Erros por Hora");
-    y = table(doc, y, [["Hora", "Erros", "Usuários únicos"]],
-      timeline.map((t) => [format(new Date(t.hour), "dd/MM HH:mm", { locale: ptBR }), t.count, t.unique_users]));
-  }
-
-  // Events
-  if (events.data.length > 0) {
-    y = checkPage(doc, y, 40);
-    y = section(doc, y, `Eventos com GUID Vazio (últimos ${events.data.length})`, ORANGE);
-    table(doc, y, [["Horário", "Nível", "User ID", "Nome", "Path"]],
-      events.data.map((e) => [
-        ts(e.timestamp),
-        e.level,
-        e.user_id || "—",
-        names[e.user_id ?? ""] || "—",
-        e.request_path || "—",
-      ]),
-      { fontSize: 7, color: ORANGE });
-  }
-
-  footers(doc, "GUID Cotação Vazio", n);
-  doc.save(`guid-vazio-${stamp()}.pdf`);
 }
 
 // ── Auth Errors ────────────────────────────────────────────────────────────
@@ -502,7 +436,6 @@ export function exportSecurityPdf(stats: SecurityStats) {
     { id: "SEC-014", sev: "ALTO",     title: "EF Core client-side eval",       detail: `${stats.efClientEval.localEval} eval local + ${stats.efClientEval.noOrderBy} First() sem OrderBy`, action: "Reescrever queries para tradução SQL completa" },
     { id: "SEC-015", sev: "MEDIO",    title: "Hangfire job failures",          detail: `${stats.hangfireFailures.length} jobs com falha/retry`, action: "Investigar dead queue e implementar alertas" },
     { id: "SEC-005", sev: "MEDIO",    title: "Usernames anômalos",             detail: `${stats.anomalousUsernames.length} username(s) em formato não-email`, action: "Validar formato de username no login" },
-    { id: "SEC-006", sev: "MEDIO",    title: "Usuários com 100% GUID vazio",   detail: `${stats.onlyEmptyGuidUsers.length} usuário(s) nunca enviaram GUID válido`, action: "Investigar integração do cliente" },
     { id: "SEC-016", sev: "MEDIO",    title: "IPs de veículos (PocSag) em log",detail: `${stats.vehicleIpsExposed.toLocaleString("pt-BR")} IPs únicos — risco LGPD`, action: "Remover ou mascarar IPs de dispositivos nos logs" },
     { id: "SEC-017", sev: "MEDIO",    title: "Queries lentas (> 500ms)",       detail: `${stats.slowQueries.count} queries, máximo ${stats.slowQueries.maxMs}ms`, action: "Adicionar índices e revisar N+1 queries" },
   ];
