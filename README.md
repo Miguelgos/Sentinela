@@ -156,10 +156,8 @@ O servidor `app/server/fn/report.ts` cruza dados de Seq, Datadog, GoCache e Graf
 | Regra | Descrição |
 |-------|-----------|
 | `BRUTE_FORCE` | ≥5 falhas de autenticação em janela de 10 min por usuário |
-| `ANOMALOUS_USERNAMES` | Usernames em formato não-email tentando autenticar |
 | `WAF_INJECTION` | Ataques SQLi/XSS bloqueados pelo WAF GoCache |
 | `MULTI_SOURCE_IP` | IPs presentes tanto no GoCache quanto nos logs do Seq |
-| `EXPIRED_CERTS` | Certificados TLS expirados nos logs do Seq |
 | `DATADOG_ALERT` | Monitores Datadog em estado Alert ou Warn |
 | `HIGH_ERROR_RATE` | >50 eventos Error/Critical na última hora |
 | `ACTIVE_INCIDENT` | Incidentes não resolvidos no Datadog |

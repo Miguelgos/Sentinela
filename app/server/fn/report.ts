@@ -185,25 +185,7 @@ export const getThreatReport = createServerFn({ method: "GET" }).handler(async (
     });
   }
 
-  // Rule 2: ANOMALOUS_USERNAMES
-  const emailRe = /^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$/;
-  const anonUsers = [...new Set(
-    authFails
-      .map(e => emailFrom(e.message || ""))
-      .filter((u): u is string => !!u && !emailRe.test(u))
-  )];
-  if (anonUsers.length > 0) {
-    findings.push({
-      rule:        "ANOMALOUS_USERNAMES",
-      title:       "Usernames Anômalos Detectados",
-      description: `${anonUsers.length} identificador(es) fora do padrão de e-mail tentando autenticar.`,
-      risk:        anonUsers.length > 10 ? "HIGH" : "MEDIUM",
-      evidence:    anonUsers.slice(0, 8).map(u => `Username: ${u}`),
-      indicators:  anonUsers.slice(0, 8),
-    });
-  }
-
-  // Rule 3: WAF_INJECTION
+  // Rule 2: WAF_INJECTION
   const injectionCount = (attackCategoryMap["SQLi"] ?? 0) + (attackCategoryMap["XSS"] ?? 0);
   if (injectionCount > 0) {
     const topURIs = [...new Set(wafEvents
@@ -247,28 +229,7 @@ export const getThreatReport = createServerFn({ method: "GET" }).handler(async (
     });
   }
 
-  // Rule 5: EXPIRED_CERTS
-  const certEvents = seqEvents.filter(e =>
-    e.message?.toLowerCase().includes("certificate") &&
-    e.message?.toLowerCase().includes("expired")
-  );
-  if (certEvents.length > 0) {
-    const certNames = [...new Set(
-      certEvents
-        .map(e => e.message?.match(/Certificate ([^h]+) has expired/)?.[1]?.trim())
-        .filter((c): c is string => Boolean(c))
-    )];
-    findings.push({
-      rule:        "EXPIRED_CERTS",
-      title:       "Certificados TLS Expirados em Produção",
-      description: `${certNames.length || certEvents.length} certificado(s) expirado(s) detectado(s) nos logs.`,
-      risk:        "MEDIUM",
-      evidence:    certNames.slice(0, 5).map(c => `Expirado: ${c}`),
-      indicators:  certNames.slice(0, 5),
-    });
-  }
-
-  // Rule 6: DATADOG_ALERT
+  // Rule 5: DATADOG_ALERT
   const alertMonitors = monitors.filter(m => {
     const state = String(m.overall_state ?? "");
     return (state === "Alert" || state === "Warn") && !String(m.name ?? "").startsWith("[license]");
