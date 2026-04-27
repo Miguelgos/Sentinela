@@ -1,4 +1,10 @@
 import { useEffect, useState, useCallback } from "react";
+import {
+  useReactTable,
+  getCoreRowModel,
+  flexRender,
+  createColumnHelper,
+} from "@tanstack/react-table";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -11,6 +17,8 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Search, ChevronLeft, ChevronRight, AlertTriangle } from "lucide-react";
 import { eventsApi, pessoaApi, type DbEvent, type EventsResponse, type EventFilters } from "@/lib/api";
 import { formatTimestamp, isEmptyGuid, truncate } from "@/lib/utils";
+
+const columnHelper = createColumnHelper<DbEvent>();
 
 export function LogsTable() {
   const [data, setData] = useState<EventsResponse | null>(null);
@@ -43,6 +51,70 @@ export function LogsTable() {
   const setFilter = (key: keyof EventFilters, value: string | boolean | undefined) => {
     setFilters((f) => ({ ...f, [key]: value || undefined, page: 1 }));
   };
+
+  const columns = [
+    columnHelper.accessor("timestamp", {
+      header: "Data/Hora",
+      cell: (info) => (
+        <span className="text-xs text-muted-foreground font-mono whitespace-nowrap">
+          {formatTimestamp(info.getValue() as string)}
+        </span>
+      ),
+    }),
+    columnHelper.accessor("level", {
+      header: "Nível",
+      cell: (info) => <LevelBadge level={info.getValue() as string} />,
+    }),
+    columnHelper.accessor("service", {
+      header: "Serviço",
+      cell: (info) => <span className="text-xs">{(info.getValue() as string | null) ?? "—"}</span>,
+    }),
+    columnHelper.accessor("message", {
+      header: "Mensagem",
+      cell: (info) => (
+        <span className="text-xs line-clamp-2 max-w-sm block">
+          {truncate((info.getValue() as string | null) ?? "", 100)}
+        </span>
+      ),
+    }),
+    columnHelper.accessor("user_id", {
+      header: "Usuário",
+      cell: (info) => {
+        const userId = info.getValue() as string | null;
+        if (!userId) return <span className="text-xs">—</span>;
+        return (
+          <div className="text-xs">
+            {names[userId] && <p className="truncate max-w-[140px]">{names[userId]}</p>}
+            <p className="font-mono text-muted-foreground">#{userId}</p>
+          </div>
+        );
+      },
+    }),
+    columnHelper.accessor("guid_cotacao", {
+      header: "GUID Cotação",
+      cell: (info) => {
+        const guid = info.getValue() as string | null;
+        if (!guid) return <span className="text-xs">—</span>;
+        if (isEmptyGuid(guid)) {
+          return (
+            <span className="text-red-400 font-mono flex items-center gap-1 text-xs">
+              <AlertTriangle className="h-3 w-3" />
+              vazio
+            </span>
+          );
+        }
+        return <span className="font-mono text-muted-foreground text-xs">{guid.slice(0, 8)}…</span>;
+      },
+    }),
+  ];
+
+  const table = useReactTable<DbEvent>({
+    data: data?.data ?? [],
+    columns,
+    getCoreRowModel: getCoreRowModel(),
+    manualPagination: true,
+    pageCount: data?.totalPages ?? 0,
+  });
 
   return (
     <>
@@ -104,14 +176,18 @@ export function LogsTable() {
           <div className="rounded-md border overflow-x-auto">
             <table className="w-full text-sm">
               <thead>
-                <tr className="border-b bg-muted/50">
-                  <th className="text-left p-2 font-medium text-xs text-muted-foreground w-36">Data/Hora</th>
-                  <th className="text-left p-2 font-medium text-xs text-muted-foreground w-24">Nível</th>
-                  <th className="text-left p-2 font-medium text-xs text-muted-foreground w-24">Serviço</th>
-                  <th className="text-left p-2 font-medium text-xs text-muted-foreground">Mensagem</th>
-                  <th className="text-left p-2 font-medium text-xs text-muted-foreground w-40">Usuário</th>
-                  <th className="text-left p-2 font-medium text-xs text-muted-foreground w-36">GUID Cotação</th>
-                </tr>
+                {table.getHeaderGroups().map((headerGroup) => (
+                  <tr key={headerGroup.id} className="border-b bg-muted/50">
+                    {headerGroup.headers.map((header) => (
+                      <th
+                        key={header.id}
+                        className="text-left p-2 font-medium text-xs text-muted-foreground"
+                      >
+                        {flexRender(header.column.columnDef.header, header.getContext())}
+                      </th>
+                    ))}
+                  </tr>
+                ))}
               </thead>
               <tbody>
                 {loading
@@ -122,40 +198,17 @@ export function LogsTable() {
                         ))}
                       </tr>
                     ))
-                  : data?.data.map((event) => (
+                  : table.getRowModel().rows.map((row) => (
                       <tr
-                        key={event.id}
+                        key={row.id}
                         className="border-b hover:bg-muted/50 cursor-pointer transition-colors"
-                        onClick={() => setSelected(event)}
+                        onClick={() => setSelected(row.original)}
                       >
-                        <td className="p-2 text-xs text-muted-foreground font-mono whitespace-nowrap">
-                          {formatTimestamp(event.timestamp)}
-                        </td>
-                        <td className="p-2"><LevelBadge level={event.level} /></td>
-                        <td className="p-2 text-xs">{event.service || "—"}</td>
-                        <td className="p-2 text-xs max-w-sm">
-                          <span className="line-clamp-2">{truncate(event.message || "", 100)}</span>
-                        </td>
-                        <td className="p-2 text-xs">
-                          {event.user_id
-                            ? <div>
-                                {names[event.user_id] && <p className="truncate max-w-[140px]">{names[event.user_id]}</p>}
-                                <p className="font-mono text-muted-foreground">#{event.user_id}</p>
-                              </div>
-                            : "—"}
-                        </td>
-                        <td className="p-2 text-xs">
-                          {event.guid_cotacao ? (
-                            isEmptyGuid(event.guid_cotacao) ? (
-                              <span className="text-red-400 font-mono flex items-center gap-1">
-                                <AlertTriangle className="h-3 w-3" />
-                                vazio
-                              </span>
-                            ) : (
-                              <span className="font-mono text-muted-foreground">{event.guid_cotacao.slice(0, 8)}…</span>
-                            )
-                          ) : "—"}
-                        </td>
+                        {row.getVisibleCells().map((cell) => (
+                          <td key={cell.id} className="p-2">
+                            {flexRender(cell.column.columnDef.cell, cell.getContext())}
+                          </td>
+                        ))}
                       </tr>
                     ))}
               </tbody>

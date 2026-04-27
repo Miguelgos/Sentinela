@@ -337,3 +337,19 @@ export const pessoaApi = {
       params: { userIds: userIds.join(",") },
     }).then((r) => r.data),
 };
+
+export const queryKeys = {
+  threatReport:    ["threatReport"],
+  auditOverview:   ["auditOverview"],
+  grafanaK8s:      ["grafanaKubernetes"],
+  grafanaJobs:     ["grafanaJobScheduler"],
+  datadogOverview: ["datadogOverview"],
+  datadogMetrics:  ["datadogMetrics"],
+  datadogInfra:    ["datadogInfra"],
+  gocacheOverview: ["gocacheOverview"],
+  statsSummary:    ["statsSummary"],
+  statsTimeline:   ["statsTimeline"],
+  kongAuth:        ["kongAuthStats"],
+  authErrors:      ["authErrorStats"],
+  security:        ["securityStats"],
+} as const;

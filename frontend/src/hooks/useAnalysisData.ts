@@ -1,24 +1,19 @@
-import { useState, useCallback, useEffect } from "react";
+import { useQuery } from "@tanstack/react-query";
 
-export function useAnalysisData<T>(fetcher: () => Promise<T>) {
-  const [data,    setData]    = useState<T | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error,   setError]   = useState<string | null>(null);
+export function useAnalysisData<T>(fetcher: () => Promise<T>, queryKey?: string[]) {
+  const key = queryKey ?? [fetcher.toString()];
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setData(await fetcher());
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setLoading(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  const { data = null, isLoading, error, refetch } = useQuery<T>({
+    queryKey: key,
+    queryFn: fetcher,
+    staleTime: 60_000,
+    retry: 1,
+  });
 
-  useEffect(() => { load(); }, [load]);
-
-  return { data, loading, error, reload: load };
+  return {
+    data:    data ?? null,
+    loading: isLoading,
+    error:   error ? String(error) : null,
+    reload:  () => { void refetch(); },
+  };
 }
