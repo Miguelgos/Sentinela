@@ -115,7 +115,7 @@ function drawLogo(doc: jsPDF, cx: number, cy: number) {
   doc.setDrawColor("#000000");
 }
 
-function header(doc: jsPDF, title: string, subtitle = "Ituran · integra-prd · salesbo") {
+function header(doc: jsPDF, title: string, subtitle = "Ituran · integra-prd") {
   const n = now();
   doc.setFillColor(BRAND);
   doc.rect(0, 0, 210, 28, "F");
@@ -433,7 +433,7 @@ export function exportThreatReportPdf(report: ThreatReport) {
   const { startY, now: n } = header(
     doc,
     "Relatório de Ameaças Cibernéticas",
-    "Ituran · salesbo · Análise Automatizada — Azure OpenAI",
+    "Ituran · integra-prd · Análise Automatizada",
   );
 
   // ── Summary box ────────────────────────────────────────────────────────────
@@ -506,9 +506,9 @@ export function exportThreatReportPdf(report: ThreatReport) {
     }
   }
 
-  // ── Gemini Narrative ───────────────────────────────────────────────────────
+  // ── AI Narrative ───────────────────────────────────────────────────────────
   y = checkPage(doc, y, 40);
-  y = section(doc, y, "Análise IA — Azure OpenAI");
+  y = section(doc, y, "Análise IA");
 
   const narrativeLines = report.narrative.split("\n").filter((l) => l.trim() !== "");
   for (const line of narrativeLines) {
@@ -530,7 +530,7 @@ export function exportThreatReportPdf(report: ThreatReport) {
       y += 6;
     } else if (isBullet) {
       const body    = cleaned.replace(/^[•\-*]\s*/, "");
-      const wrapped = doc.splitTextToSize(`• ${body}`, 174);
+      const wrapped = doc.splitTextToSize(`- ${body}`, 174);
       y = checkPage(doc, y, wrapped.length * 4.5 + 2);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(8.5);
@@ -548,13 +548,12 @@ export function exportThreatReportPdf(report: ThreatReport) {
     }
   }
 
-  // Gemini disclaimer
   y += 4;
   y = checkPage(doc, y, 10);
   doc.setFont("helvetica", "italic");
   doc.setFontSize(7);
   doc.setTextColor(GRAY);
-  doc.text("Esta análise foi gerada automaticamente por Azure OpenAI e deve ser revisada por um analista de segurança.", 14, y, { maxWidth: 182 });
+  doc.text("Esta analise foi gerada automaticamente por IA e deve ser revisada por um analista de seguranca.", 14, y, { maxWidth: 182 });
 
   footers(doc, "Relatório de Ameaças", n);
   doc.save(`relatorio-ameacas-${stamp()}.pdf`);
