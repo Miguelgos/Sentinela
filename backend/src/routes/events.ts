@@ -216,7 +216,7 @@ router.get("/stats/auth-errors", async (_req: Request, res: Response) => {
 router.get("/stats/kong-auth", async (_req: Request, res: Response) => {
   try {
     const kongAll = await fetchSeq({
-      filter:   "@Message = 'Kong Auth Request'",
+      filter:   "@MessageTemplate = 'Kong Auth Request'",
       maxTotal: 10000,
     });
     const kongFail = kongAll.filter(e => Number(prop(e, "StatusCode")) !== 200);

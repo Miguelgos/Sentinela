@@ -9,6 +9,22 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export default defineConfig({
   publicDir: path.resolve(__dirname, "frontend/public"),
+  server: {
+    host: "0.0.0.0",
+    port: 5173,
+    hmr: { clientPort: 5173 },
+    headers: {
+      "Content-Security-Policy": [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline'",
+        "style-src 'self' 'unsafe-inline'",
+        "img-src 'self' data: blob:",
+        "font-src 'self'",
+        "connect-src 'self' https://*.supabase.co wss://*.supabase.co http://localhost:3001",
+        "frame-ancestors 'none'",
+      ].join("; "),
+    },
+  },
   plugins: [
     tanstackStart({
       srcDirectory: "app",

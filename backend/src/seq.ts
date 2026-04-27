@@ -43,9 +43,7 @@ export async function fetchSeq(opts: {
   let afterId: string | undefined;
 
   while (results.length < MAX) {
-    const SEQ_SIGNAL = process.env.SEQ_SIGNAL || "";
     let qs = `?count=${PAGE}&render=true`;
-    if (SEQ_SIGNAL)    qs += `&signal=${encodeURIComponent(SEQ_SIGNAL)}`;
     if (opts.filter)   qs += `&filter=${encodeURIComponent(opts.filter)}`;
     if (opts.fromDate) qs += `&fromDateUtc=${encodeURIComponent(opts.fromDate.toISOString())}`;
     if (afterId)       qs += `&afterId=${encodeURIComponent(afterId)}`;

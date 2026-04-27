@@ -10,7 +10,8 @@
     "baseUrl": ".",
     "paths": {
       "@/*": ["./frontend/src/*"]
-    }
+    },
+    "types": ["vite/client", "node"]
   },
   "include": ["app", "frontend/src", "backend/src"]
 }

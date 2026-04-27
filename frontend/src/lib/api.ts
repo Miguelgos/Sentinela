@@ -5,7 +5,6 @@ import {
   getStatsSummary,
   getTimeline,
   getAuthErrorStats,
-  getSecurityStats,
   getKongAuthStats,
 } from "../../../app/server/fn/events";
 import { lookupPessoa } from "../../../app/server/fn/pessoa";
@@ -16,10 +15,7 @@ import {
 } from "../../../app/server/fn/datadog";
 import { getGocacheOverview } from "../../../app/server/fn/gocache";
 import { getThreatReport } from "../../../app/server/fn/report";
-import {
-  getGrafanaKubernetes,
-  getGrafanaJobScheduler,
-} from "../../../app/server/fn/grafana";
+import { getGrafanaKubernetes } from "../../../app/server/fn/grafana";
 import { getAuditOverview } from "../../../app/server/fn/audit";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -67,24 +63,6 @@ export interface TimelineEntry {
   hour: string;
   level: string;
   count: string;
-}
-
-export interface SecurityStats {
-  authByEndpoint: { request_path: string; client_id: string; failures: string; unique_users: string }[];
-  bruteForce: { username: string; attempts: string; window_minutes: string; rate_per_min: string; first_seen: string; last_seen: string }[];
-  anomalousUsernames: { username: string; attempts: string }[];
-  topErrorEndpoints: { request_path: string; level: string; count: string }[];
-  criticalByContext: { source_context: string; count: string; last_seen: string }[];
-  swaggerEvidence: number;
-  stackTraceEndpoints: { request_path: string; count: string }[];
-  jwtInLogs: { total: number; uniqueTokens: number; firstSeen: string | null; lastSeen: string | null };
-  expiredCerts: { count: string; cert_name: string; expired_on: string; first_seen: string; last_seen: string }[];
-  dataProtectionUnencrypted: number;
-  forwardedHeadersMismatch: number;
-  efClientEval: { localEval: number; noOrderBy: number };
-  hangfireFailures: { message: string; count: string; last_seen: string }[];
-  vehicleIpsExposed: number;
-  slowQueries: { count: number; maxMs: number };
 }
 
 export interface KongAuthStats {
@@ -208,9 +186,9 @@ export interface AuditOverview {
     service: string;
     userId: string;
     count: number;
-    maskedAccess: number;
+    unmaskedAccess: number;
   }[];
-  maskedDataAccess: { userId: string; service: string; count: number }[];
+  unmaskedDataAccess: { userId: string; service: string; count: number }[];
   externalIPs: {
     ip: string;
     userId: string;
@@ -229,7 +207,7 @@ export interface AuditOverview {
     userId: string;
     ip: string;
     page: string;
-    masked: boolean;
+    unmasked: boolean;
   }[];
 }
 
@@ -258,25 +236,6 @@ export interface GrafanaKubernetes {
   deploymentsDown: string[];
   podRestarts: { pod: string; restarts: number }[];
   alerts: GrafanaAlert[];
-}
-
-export interface GrafanaProvider {
-  name: string;
-  processed: number;
-  errors: number;
-  errorsLastHour: number;
-  errorRate: number;
-  avgDurationMs: number;
-  activeRequests: number;
-}
-
-export interface GrafanaJobScheduler {
-  providers: GrafanaProvider[];
-  totals: {
-    processed: number;
-    errors: number;
-    errorRate: number;
-  };
 }
 
 export type RiskLevel = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";
@@ -311,14 +270,12 @@ export const eventsApi = {
   stats:              ()                            => getStatsSummary(),
   timeline:           (hours?: number)              => getTimeline({ data: { hours } }),
   authErrorStats:     ()                            => getAuthErrorStats(),
-  securityStats:      ()                            => getSecurityStats(),
   kongAuthStats:      ()                            => getKongAuthStats(),
   datadogOverview:    ()                            => getDatadogOverview(),
   gocacheOverview:    ()                            => getGocacheOverview(),
   datadogMetrics:     ()                            => getDatadogMetrics(),
   datadogInfra:       ()                            => getDatadogInfra(),
   grafanaKubernetes:  ()                            => getGrafanaKubernetes(),
-  grafanaJobScheduler:()                            => getGrafanaJobScheduler(),
   auditOverview:      ()                            => getAuditOverview(),
 };
 
@@ -335,7 +292,6 @@ export const queryKeys = {
   threatReport:    ["threatReport"],
   auditOverview:   ["auditOverview"],
   grafanaK8s:      ["grafanaKubernetes"],
-  grafanaJobs:     ["grafanaJobScheduler"],
   datadogOverview: ["datadogOverview"],
   datadogMetrics:  ["datadogMetrics"],
   datadogInfra:    ["datadogInfra"],
@@ -344,5 +300,4 @@ export const queryKeys = {
   statsTimeline:   ["statsTimeline"],
   kongAuth:        ["kongAuthStats"],
   authErrors:      ["authErrorStats"],
-  security:        ["securityStats"],
 } as const;

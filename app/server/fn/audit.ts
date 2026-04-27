@@ -20,7 +20,7 @@ interface AuditEvent {
   ip:        string;
   page:      string;
   sistema:   number;
-  masked:    boolean;
+  unmasked:  boolean;
 }
 
 function isExternalIp(ip: string): boolean {
@@ -35,7 +35,9 @@ function isExternalIp(ip: string): boolean {
   return true;
 }
 
-function hasViewMaskedData(jsParametros: string | Record<string, unknown> | undefined): boolean {
+// JS_PARAMETROS contém ViewMaskedData=true quando o usuário visualizou
+// os dados SEM máscara (acessou o dado real, sensível para LGPD).
+function viewedUnmaskedData(jsParametros: string | Record<string, unknown> | undefined): boolean {
   if (!jsParametros) return false;
   try {
     const obj: Record<string, unknown> =
@@ -77,10 +79,10 @@ function extractEvent(service: string, tsNs: string, line: string): AuditEvent |
     const ip     = String(fields.IP_USUARIO   ?? "");
     const page   = String(fields.PAGINA_ACESSADA ?? "");
     const sistema = Number(fields.CD_SISTEMA ?? 0);
-    const masked  = hasViewMaskedData(fields.JS_PARAMETROS);
+    const unmasked = viewedUnmaskedData(fields.JS_PARAMETROS);
     const timestampMs = Math.floor(Number(tsNs) / 1_000_000);
 
-    return { service, timestampMs, userId, ip, page, sistema, masked };
+    return { service, timestampMs, userId, ip, page, sistema, unmasked };
   } catch {
     return null;
   }
@@ -153,33 +155,33 @@ export const getAuditOverview = createServerFn({ method: "GET" }).handler(async 
 
   // topUsers
   const userKey = (svc: string, uid: string) => `${svc}||${uid}`;
-  const userCount  = new Map<string, number>();
-  const userMasked = new Map<string, number>();
+  const userCount    = new Map<string, number>();
+  const userUnmasked = new Map<string, number>();
   for (const ev of allEvents) {
     const k = userKey(ev.service, ev.userId);
     userCount.set(k, (userCount.get(k) ?? 0) + 1);
-    if (ev.masked) userMasked.set(k, (userMasked.get(k) ?? 0) + 1);
+    if (ev.unmasked) userUnmasked.set(k, (userUnmasked.get(k) ?? 0) + 1);
   }
   const topUsers = Array.from(userCount.entries())
     .map(([k, count]) => {
       const [service, userId] = k.split("||");
-      return { service, userId, count, maskedAccess: userMasked.get(k) ?? 0 };
+      return { service, userId, count, unmaskedAccess: userUnmasked.get(k) ?? 0 };
     })
     .sort((a, b) => b.count - a.count)
     .slice(0, 20);
 
-  // maskedDataAccess
-  const maskedMap = new Map<string, { count: number; service: string }>();
+  // unmaskedDataAccess — usuários que viram dados sem máscara (relevante LGPD)
+  const unmaskedMap = new Map<string, { count: number; service: string }>();
   for (const ev of allEvents) {
-    if (!ev.masked) continue;
-    const existing = maskedMap.get(ev.userId);
+    if (!ev.unmasked) continue;
+    const existing = unmaskedMap.get(ev.userId);
     if (!existing) {
-      maskedMap.set(ev.userId, { count: 1, service: ev.service });
+      unmaskedMap.set(ev.userId, { count: 1, service: ev.service });
     } else {
       existing.count += 1;
     }
   }
-  const maskedDataAccess = Array.from(maskedMap.entries())
+  const unmaskedDataAccess = Array.from(unmaskedMap.entries())
     .map(([userId, v]) => ({ userId, service: v.service, count: v.count }))
     .sort((a, b) => b.count - a.count)
     .slice(0, 10);
@@ -216,14 +218,14 @@ export const getAuditOverview = createServerFn({ method: "GET" }).handler(async 
       userId:    ev.userId,
       ip:        ev.ip,
       page:      ev.page,
-      masked:    ev.masked,
+      unmasked:  ev.unmasked,
     }));
 
   return {
     totals,
     topPages,
     topUsers,
-    maskedDataAccess,
+    unmaskedDataAccess,
     externalIPs,
     suspiciousUsers,
     recentEvents,

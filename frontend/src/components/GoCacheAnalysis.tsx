@@ -140,7 +140,7 @@ function GoCacheContent({ data }: { data: GoCacheOverview }) {
   }));
 
   const timelineData = (timeline ?? []).map((t) => ({
-    hour: t.hour.slice(11, 16), // HH:MM
+    hour: format(new Date(t.hour), "HH:mm"),
     waf: t.waf,
     bot: t.bot,
     firewall: t.firewall,

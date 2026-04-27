@@ -3,6 +3,9 @@ import { SeqApiEvent, parseSeqApiEvent } from "./types";
 
 export type ParsedEvent = ReturnType<typeof parseSeqApiEvent>;
 
+// Só traz erros e alertas do SEQ — reduz volume drasticamente
+const LEVEL_FILTER = "@Level in ['Warning', 'Error', 'Fatal']";
+
 // ── Noise sources descartadas em níveis não-críticos ─────────────────────────
 const NOISE_SOURCES = new Set([
   "IdentityServer4.AccessTokenValidation.IdentityServerAuthenticationHandler",
@@ -76,9 +79,10 @@ async function fetchFromSeq(sinceDate?: Date, maxEvents = 500_000): Promise<{ ev
 
   while (results.length < maxEvents) {
     let qs = `?count=${PAGE}&render=true`;
-    if (SEQ_SIGNAL) qs += `&signal=${encodeURIComponent(SEQ_SIGNAL)}`;
-    if (sinceDate)  qs += `&fromDateUtc=${encodeURIComponent(sinceDate.toISOString())}`;
-    if (afterId)    qs += `&afterId=${encodeURIComponent(afterId)}`;
+    if (SEQ_SIGNAL)   qs += `&signal=${encodeURIComponent(SEQ_SIGNAL)}`;
+    qs += `&filter=${encodeURIComponent(LEVEL_FILTER)}`;
+    if (sinceDate)    qs += `&fromDateUtc=${encodeURIComponent(sinceDate.toISOString())}`;
+    if (afterId)      qs += `&afterId=${encodeURIComponent(afterId)}`;
 
     const raw: SeqApiEvent[] = await seqHttpGet(`/api/events/${qs}`);
     if (raw.length === 0) break;
@@ -106,6 +110,7 @@ async function refresh(): Promise<void> {
   const SEQ_SIGNAL = process.env.SEQ_SIGNAL || "";
   let qs = `?count=${PAGE}&render=true`;
   if (SEQ_SIGNAL) qs += `&signal=${encodeURIComponent(SEQ_SIGNAL)}`;
+  qs += `&filter=${encodeURIComponent(LEVEL_FILTER)}`;
 
   const raw: SeqApiEvent[] = await seqHttpGet(`/api/events/${qs}`);
   if (raw.length === 0) return;

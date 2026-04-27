@@ -1,3 +1,4 @@
+import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -9,7 +10,7 @@ import {
   Globe,
   Users,
 } from "lucide-react";
-import { eventsApi, type AuditOverview } from "@/lib/api";
+import { eventsApi, pessoaApi, type AuditOverview } from "@/lib/api";
 import { useAnalysisData } from "@/hooks/useAnalysisData";
 import { AnalysisShell } from "@/components/AnalysisShell";
 
@@ -53,6 +54,21 @@ function ServiceBadge({ service }: { service: string }) {
 
 export function AuditAnalysis() {
   const { data, loading, error, reload } = useAnalysisData(() => eventsApi.auditOverview());
+  const [names, setNames] = useState<Record<string, string>>({});
+
+  useEffect(() => {
+    if (!data) return;
+    const ids = [
+      ...new Set([
+        ...data.topUsers.map((u) => u.userId),
+        ...data.unmaskedDataAccess.map((u) => u.userId),
+        ...data.suspiciousUsers.map((u) => u.userId),
+        ...data.recentEvents.map((e) => e.userId),
+        ...data.externalIPs.map((e) => e.userId),
+      ]),
+    ].filter((id) => id && id !== "unknown");
+    if (ids.length > 0) pessoaApi.lookup(ids).then(setNames).catch(() => {});
+  }, [data]);
 
   return (
     <AnalysisShell
@@ -66,24 +82,32 @@ export function AuditAnalysis() {
         </Button>
       }
     >
-      {data && <AuditContent data={data} />}
+      {data && <AuditContent data={data} names={names} />}
     </AnalysisShell>
   );
 }
 
-function AuditContent({ data }: { data: AuditOverview }) {
+function UserCell({ userId, names }: { userId: string; names: Record<string, string> }) {
+  const name = names[userId];
+  if (name) {
+    return <span className="truncate max-w-[180px] block">{name}</span>;
+  }
+  return <span className="font-mono text-muted-foreground">#{userId}</span>;
+}
+
+function AuditContent({ data, names }: { data: AuditOverview; names: Record<string, string> }) {
   const {
     totals,
     topPages,
     topUsers,
-    maskedDataAccess,
+    unmaskedDataAccess,
     externalIPs,
     suspiciousUsers,
     recentEvents,
   } = data;
 
   const totalEvents = totals.reduce((sum, t) => sum + t.events, 0);
-  const totalMasked = maskedDataAccess.reduce((sum, m) => sum + m.count, 0);
+  const totalUnmasked = unmaskedDataAccess.reduce((sum, m) => sum + m.count, 0);
   const services = [...new Set(topPages.map((p) => p.service))];
 
   // Set of IPs considered external (present in the externalIPs list)
@@ -113,17 +137,17 @@ function AuditContent({ data }: { data: AuditOverview }) {
           </CardContent>
         </Card>
 
-        <Card className={totalMasked > 0 ? "border-red-500/30" : ""}>
+        <Card className={totalUnmasked > 0 ? "border-red-500/30" : ""}>
           <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Acessos mascarados</p>
+            <p className="text-xs text-muted-foreground">Acessos a dados desmascarados</p>
             <p
               className={`text-2xl font-bold ${
-                totalMasked > 0 ? "text-red-300" : "text-green-300"
+                totalUnmasked > 0 ? "text-red-300" : "text-green-300"
               }`}
             >
-              {totalMasked.toLocaleString("pt-BR")}
+              {totalUnmasked.toLocaleString("pt-BR")}
             </p>
-            <p className="text-xs text-muted-foreground">ViewMaskedData</p>
+            <p className="text-xs text-muted-foreground">Visualização do dado real (LGPD)</p>
           </CardContent>
         </Card>
 
@@ -188,9 +212,7 @@ function AuditContent({ data }: { data: AuditOverview }) {
                       <td className="p-3 font-mono text-red-300 font-semibold">
                         {row.ip}
                       </td>
-                      <td className="p-3 font-mono text-muted-foreground">
-                        {row.userId}
-                      </td>
+                      <td className="p-3"><UserCell userId={row.userId} names={names} /></td>
                       <td className="p-3 font-mono text-xs text-muted-foreground max-w-[260px] truncate" title={row.page}>
                         {row.page}
                       </td>
@@ -206,15 +228,15 @@ function AuditContent({ data }: { data: AuditOverview }) {
         </Card>
       )}
 
-      {/* ── Dados Mascarados Acessados ── */}
-      {maskedDataAccess.length > 0 && (
+      {/* ── Acessos a Dados Desmascarados (LGPD) ── */}
+      {unmaskedDataAccess.length > 0 && (
         <Card className="border-orange-500/30 bg-orange-500/5">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium flex items-center gap-2">
               <ShieldAlert className="h-4 w-4 text-orange-400" />
-              Acessos a Dados Mascarados
+              Acessos a Dados Desmascarados (visualização do dado real)
               <Badge variant="secondary" className="ml-auto">
-                {maskedDataAccess.length}
+                {unmaskedDataAccess.length}
               </Badge>
             </CardTitle>
           </CardHeader>
@@ -225,13 +247,13 @@ function AuditContent({ data }: { data: AuditOverview }) {
                   <tr className="border-b bg-muted/30">
                     <th className="text-left p-3 text-muted-foreground">Usuário</th>
                     <th className="text-left p-3 text-muted-foreground">Serviço</th>
-                    <th className="text-right p-3 text-muted-foreground">Acessos mascarados</th>
+                    <th className="text-right p-3 text-muted-foreground">Visualizações sem máscara</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {maskedDataAccess.map((row, i) => (
+                  {unmaskedDataAccess.map((row, i) => (
                     <tr key={i} className="border-b hover:bg-muted/20">
-                      <td className="p-3 font-mono text-muted-foreground">{row.userId}</td>
+                      <td className="p-3"><UserCell userId={row.userId} names={names} /></td>
                       <td className="p-3">
                         <ServiceBadge service={row.service} />
                       </td>
@@ -337,12 +359,12 @@ function AuditContent({ data }: { data: AuditOverview }) {
                     <th className="text-left p-3 text-muted-foreground">Usuário</th>
                     <th className="text-left p-3 text-muted-foreground">Serviço</th>
                     <th className="text-right p-3 text-muted-foreground">Total acessos</th>
-                    <th className="text-right p-3 text-muted-foreground">Dados mascarados</th>
+                    <th className="text-right p-3 text-muted-foreground">Dados desmascarados</th>
                   </tr>
                 </thead>
                 <tbody>
                   {topUsers.map((row, i) => {
-                    const suspicious = row.maskedAccess > 5;
+                    const suspicious = row.unmaskedAccess > 5;
                     return (
                       <tr
                         key={i}
@@ -350,12 +372,8 @@ function AuditContent({ data }: { data: AuditOverview }) {
                           suspicious ? "bg-yellow-500/10" : ""
                         }`}
                       >
-                        <td
-                          className={`p-3 font-mono ${
-                            suspicious ? "text-yellow-300 font-semibold" : "text-muted-foreground"
-                          }`}
-                        >
-                          {row.userId}
+                        <td className="p-3">
+                          <UserCell userId={row.userId} names={names} />
                         </td>
                         <td className="p-3">
                           <ServiceBadge service={row.service} />
@@ -364,15 +382,15 @@ function AuditContent({ data }: { data: AuditOverview }) {
                           {row.count.toLocaleString("pt-BR")}
                         </td>
                         <td className="p-3 text-right font-mono">
-                          {row.maskedAccess > 0 ? (
+                          {row.unmaskedAccess > 0 ? (
                             <span
                               className={
-                                row.maskedAccess > 5
+                                row.unmaskedAccess > 5
                                   ? "text-yellow-300 font-bold"
                                   : "text-muted-foreground"
                               }
                             >
-                              {row.maskedAccess.toLocaleString("pt-BR")}
+                              {row.unmaskedAccess.toLocaleString("pt-BR")}
                             </span>
                           ) : (
                             <span className="text-muted-foreground">0</span>
@@ -409,25 +427,40 @@ function AuditContent({ data }: { data: AuditOverview }) {
                     <th className="text-left p-3 text-muted-foreground">Serviço</th>
                     <th className="text-right p-3 text-muted-foreground">Total eventos</th>
                     <th className="text-right p-3 text-muted-foreground">Páginas únicas</th>
+                    <th className="text-right p-3 text-muted-foreground">Dados desmascarados</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {suspiciousUsers.map((row, i) => (
-                    <tr key={i} className="border-b hover:bg-muted/20">
-                      <td className="p-3 font-mono text-yellow-300 font-semibold">
-                        {row.userId}
-                      </td>
-                      <td className="p-3">
-                        <ServiceBadge service={row.service} />
-                      </td>
-                      <td className="p-3 text-right font-mono font-bold text-yellow-300">
-                        {row.count.toLocaleString("pt-BR")}
-                      </td>
-                      <td className="p-3 text-right font-mono text-muted-foreground">
-                        {row.uniquePages.toLocaleString("pt-BR")}
-                      </td>
-                    </tr>
-                  ))}
+                  {suspiciousUsers.map((row, i) => {
+                    const unmasked = topUsers.find(
+                      (u) => u.userId === row.userId && u.service === row.service
+                    )?.unmaskedAccess ?? 0;
+                    return (
+                      <tr key={i} className="border-b hover:bg-muted/20">
+                        <td className="p-3">
+                          <UserCell userId={row.userId} names={names} />
+                        </td>
+                        <td className="p-3">
+                          <ServiceBadge service={row.service} />
+                        </td>
+                        <td className="p-3 text-right font-mono font-bold text-yellow-300">
+                          {row.count.toLocaleString("pt-BR")}
+                        </td>
+                        <td className="p-3 text-right font-mono text-muted-foreground">
+                          {row.uniquePages.toLocaleString("pt-BR")}
+                        </td>
+                        <td className="p-3 text-right font-mono">
+                          {unmasked > 0 ? (
+                            <span className={unmasked > 10 ? "text-red-300 font-bold" : "text-orange-300"}>
+                              {unmasked.toLocaleString("pt-BR")}
+                            </span>
+                          ) : (
+                            <span className="text-muted-foreground">0</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -471,7 +504,7 @@ function AuditContent({ data }: { data: AuditOverview }) {
                         className={`border-b hover:bg-muted/20 ${
                           isExternal
                             ? "bg-red-500/10"
-                            : ev.masked
+                            : ev.unmasked
                             ? "bg-orange-500/5"
                             : ""
                         }`}
@@ -482,12 +515,8 @@ function AuditContent({ data }: { data: AuditOverview }) {
                         <td className="p-2">
                           <ServiceBadge service={ev.service} />
                         </td>
-                        <td
-                          className={`p-2 font-mono ${
-                            isExternal ? "text-red-300 font-semibold" : "text-muted-foreground"
-                          }`}
-                        >
-                          {ev.userId}
+                        <td className="p-2">
+                          <UserCell userId={ev.userId} names={names} />
                         </td>
                         <td
                           className={`p-2 font-mono ${
@@ -503,12 +532,13 @@ function AuditContent({ data }: { data: AuditOverview }) {
                           {ev.page}
                         </td>
                         <td className="p-2">
-                          {ev.masked && (
+                          {ev.unmasked && (
                             <Badge
                               variant="secondary"
                               className="bg-orange-500/20 text-orange-300 border-orange-500/30 text-[10px] whitespace-nowrap"
+                              title="Usuário visualizou os dados sem máscara (dado real)"
                             >
-                              MASCARADO
+                              DADO REAL
                             </Badge>
                           )}
                           {isExternal && (

@@ -66,7 +66,7 @@ export const getThreatReport = createServerFn({ method: "GET" }).handler(async (
     seqResult, ddMonitorsResult, ddIncidentsResult,
     gcWafResult, gcBotResult, gcFirewallResult,
     ddInfraResult,
-    grafanaAlertsResult, grafanaDownResult, grafanaJobsResult,
+    grafanaAlertsResult, grafanaDownResult,
   ] = await Promise.allSettled([
     Promise.resolve(getEvents()),
     ddFetch("/api/v1/monitor?with_downtimes=false&page=0&page_size=100"),
@@ -87,7 +87,6 @@ export const getThreatReport = createServerFn({ method: "GET" }).handler(async (
     ]),
     grafanaFiringAlerts(),
     grafanaPromQuery('kube_deployment_status_replicas_available{namespace="integra-prd"} == 0'),
-    grafanaPromQuery('sum by (provider_name)(jobscheduler_events_errors_total{job="jobscheduler"})'),
   ]);
 
   const seqOk = seqResult.status === "fulfilled";
@@ -404,11 +403,6 @@ export const getThreatReport = createServerFn({ method: "GET" }).handler(async (
     ? grafanaDownResult.value.map(r => r.metric.deployment).filter(Boolean)
     : [];
 
-  type JobResult = { metric: Record<string, string>; value: [number, string] };
-  const jobErrors = grafanaJobsResult.status === "fulfilled"
-    ? (grafanaJobsResult.value as JobResult[]).filter(r => parseFloat(r.value[1]) > 1000)
-    : [];
-
   // Rule 13: PROMETHEUS_ALERT
   if (criticalAlerts.length > 0 || firingAlerts.filter(a => a.severity === "warning").length > 3) {
     findings.push({
@@ -430,22 +424,6 @@ export const getThreatReport = createServerFn({ method: "GET" }).handler(async (
       risk:        downDeps.length > 5 ? "MEDIUM" : "LOW",
       evidence:    downDeps.slice(0, 8).map(d => `Parado: ${d}`),
       indicators:  downDeps.slice(0, 8),
-    });
-  }
-
-  // Rule 15: JOBSCHEDULER_ERRORS
-  if (jobErrors.length > 0) {
-    const highErrors = jobErrors.map(r => ({
-      name:   r.metric.provider_name,
-      errors: Math.round(parseFloat(r.value[1])),
-    })).sort((a, b) => b.errors - a.errors);
-    findings.push({
-      rule:        "JOBSCHEDULER_ERRORS",
-      title:       "Providers JobScheduler com Alta Taxa de Erros",
-      description: `${highErrors.length} provider(s) com mais de 1.000 erros acumulados no JobScheduler.`,
-      risk:        highErrors[0]?.errors > 50000 ? "HIGH" : "MEDIUM",
-      evidence:    highErrors.slice(0, 5).map(p => `${p.name}: ${p.errors.toLocaleString()} erros`),
-      indicators:  highErrors.slice(0, 5).map(p => p.name),
     });
   }
 
@@ -480,7 +458,6 @@ MÉTRICAS DO PERÍODO:
 - Datadog: ${ddSummary}
 - GoCache WAF/Bot/Firewall: ${gcSummary}
 - Kubernetes: ${criticalAlerts.length} alertas críticos, ${downDeps.length} deployments parados
-- JobScheduler: ${jobErrors.length} providers com >1000 erros
 - Nível de risco geral: ${overallRisk}
 
 AMEAÇAS CORRELACIONADAS (${findings.length} regras disparadas):

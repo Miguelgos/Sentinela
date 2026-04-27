@@ -2,7 +2,7 @@ import jsPDF from "jspdf";
 import autoTable from "jspdf-autotable";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import type { KongAuthStats, StatsSummary, TimelineEntry, AuthErrorStats, SecurityStats, ThreatReport, RiskLevel } from "./api";
+import type { KongAuthStats, StatsSummary, TimelineEntry, AuthErrorStats, ThreatReport, RiskLevel } from "./api";
 
 // ── Logo preload (rasterize SVG → PNG data URL on first import) ────────────
 let _logoDataUrl: string | null = null;
@@ -419,85 +419,6 @@ export function exportAuthErrorPdf(stats: AuthErrorStats) {
   doc.save(`auth-errors-${stamp()}.pdf`);
 }
 
-// ── Security ───────────────────────────────────────────────────────────────
-export function exportSecurityPdf(stats: SecurityStats) {
-  const doc = createDoc();
-  const { startY, now: n } = header(doc, "Análise de Segurança — salesbo");
-
-  const findings = [
-    { id: "SEC-010", sev: "CRITICO",  title: "JWT / Token em logs",           detail: `${stats.jwtInLogs.total} ocorrências, ${stats.jwtInLogs.uniqueTokens} token(s) único(s)`, action: "Remover log TokenRecebido em produção" },
-    { id: "SEC-011", sev: "CRITICO",  title: "Certificado SSL expirado",       detail: stats.expiredCerts.map((c) => `${c.cert_name || "auth-dev.ituran.dev"} (exp. ${c.expired_on}): ${c.count} avisos`).join("; ") || "—", action: "Renovar certificado imediatamente" },
-    { id: "SEC-001", sev: "CRITICO",  title: "Brute Force detectado",          detail: `${stats.bruteForce.length} usuário(s) com >= 3 tentativas em < 5 min`, action: "Implementar rate-limit e bloqueio de conta" },
-    { id: "SEC-002", sev: "CRITICO",  title: "Exceções críticas não tratadas", detail: `${stats.criticalByContext.length} contextos com erros Critical`, action: "Tratar exceções e adicionar fallback" },
-    { id: "SEC-012", sev: "ALTO",     title: "DataProtection sem criptografia",detail: `${stats.dataProtectionUnencrypted} chaves sem XML encryptor`, action: "Configurar encryptor (Azure Key Vault / DPAPI)" },
-    { id: "SEC-013", sev: "ALTO",     title: "ForwardedHeaders mismatch",      detail: `${stats.forwardedHeadersMismatch.toLocaleString("pt-BR")} avisos — risco de IP spoofing`, action: "Corrigir configuração de proxy reverso" },
-    { id: "SEC-003", sev: "ALTO",     title: "Swagger em produção",            detail: `${stats.swaggerEvidence} ocorrências detectadas`, action: "Desabilitar Swagger em ambiente de produção" },
-    { id: "SEC-004", sev: "ALTO",     title: "Stack traces expostos",          detail: `${stats.stackTraceEndpoints.length} endpoint(s) com stack trace nos logs`, action: "Usar handler global de exceções sem expor stack" },
-    { id: "SEC-014", sev: "ALTO",     title: "EF Core client-side eval",       detail: `${stats.efClientEval.localEval} eval local + ${stats.efClientEval.noOrderBy} First() sem OrderBy`, action: "Reescrever queries para tradução SQL completa" },
-    { id: "SEC-015", sev: "MEDIO",    title: "Hangfire job failures",          detail: `${stats.hangfireFailures.length} jobs com falha/retry`, action: "Investigar dead queue e implementar alertas" },
-    { id: "SEC-005", sev: "MEDIO",    title: "Usernames anômalos",             detail: `${stats.anomalousUsernames.length} username(s) em formato não-email`, action: "Validar formato de username no login" },
-    { id: "SEC-016", sev: "MEDIO",    title: "IPs de veículos (PocSag) em log",detail: `${stats.vehicleIpsExposed.toLocaleString("pt-BR")} IPs únicos — risco LGPD`, action: "Remover ou mascarar IPs de dispositivos nos logs" },
-    { id: "SEC-017", sev: "MEDIO",    title: "Queries lentas (> 500ms)",       detail: `${stats.slowQueries.count} queries, máximo ${stats.slowQueries.maxMs}ms`, action: "Adicionar índices e revisar N+1 queries" },
-  ];
-
-  const sevColor: Record<string, string> = { CRITICO: RED, ALTO: ORANGE, MEDIO: YELLOW };
-  const counts: Record<string, number> = { CRITICO: 0, ALTO: 0, MEDIO: 0 };
-  findings.forEach((f) => { counts[f.sev] = (counts[f.sev] ?? 0) + 1; });
-
-  let y = summaryBox(doc, startY, [
-    ["Achados CRITICO", counts["CRITICO"].toString(), RED],
-    ["Achados ALTO",    counts["ALTO"].toString(),    ORANGE],
-    ["Achados MEDIO",   counts["MEDIO"].toString(),   YELLOW],
-  ]);
-
-  // All findings table
-  y = checkPage(doc, y, 40);
-  y = section(doc, y, "Sumário de Achados de Segurança");
-  y = table(doc, y, [["ID", "Severidade", "Achado", "Detalhe", "Ação Recomendada"]],
-    findings.map((f) => [f.id, f.sev, f.title, f.detail, f.action]),
-    {
-      fontSize: 7,
-      columnStyles: { 0: { cellWidth: 18 }, 1: { cellWidth: 18 }, 2: { cellWidth: 38 }, 3: { cellWidth: 60 }, 4: { cellWidth: 48 } },
-      didParseCell: (data) => {
-        if (data.column.index === 1 && data.section === "body") {
-          const sev = data.cell.text[0] as string;
-          data.cell.styles.textColor = sevColor[sev] ?? GRAY;
-          data.cell.styles.fontStyle = "bold";
-        }
-      },
-    });
-
-  // Brute force detail
-  if (stats.bruteForce.length > 0) {
-    y = checkPage(doc, y, 40);
-    y = section(doc, y, "SEC-001 — Brute Force: detalhe por usuário", RED);
-    y = table(doc, y, [["Username", "Tentativas", "Req/min", "Janela (min)", "Início", "Fim"]],
-      stats.bruteForce.map((r) => [r.username, r.attempts, r.rate_per_min, r.window_minutes, ts(r.first_seen), ts(r.last_seen)]),
-      { color: RED, fontSize: 7 });
-  }
-
-  // Hangfire detail
-  if (stats.hangfireFailures.length > 0) {
-    y = checkPage(doc, y, 35);
-    y = section(doc, y, "SEC-015 — Hangfire: jobs com falha", YELLOW);
-    y = table(doc, y, [["Mensagem", "Ocorrências", "Último"]],
-      stats.hangfireFailures.map((r) => [r.message, r.count, ts(r.last_seen)]),
-      { color: YELLOW, fontSize: 7 });
-  }
-
-  // Stack trace endpoints
-  if (stats.stackTraceEndpoints.length > 0) {
-    y = checkPage(doc, y, 35);
-    y = section(doc, y, "SEC-004 — Endpoints com Stack Trace", ORANGE);
-    table(doc, y, [["Endpoint", "Ocorrências"]],
-      stats.stackTraceEndpoints.map((r) => [r.request_path, r.count]),
-      { color: ORANGE, fontSize: 7 });
-  }
-
-  footers(doc, "Análise de Segurança", n);
-  doc.save(`security-${stamp()}.pdf`);
-}
-
 // ── Threat Report ──────────────────────────────────────────────────────────
 const RISK_LABEL: Record<RiskLevel, string> = {
   CRITICAL: "CRÍTICO", HIGH: "ALTO", MEDIUM: "MÉDIO", LOW: "BAIXO", INFO: "INFO",
@@ -512,7 +433,7 @@ export function exportThreatReportPdf(report: ThreatReport) {
   const { startY, now: n } = header(
     doc,
     "Relatório de Ameaças Cibernéticas",
-    "Ituran · salesbo · Análise Automatizada — Gemini 2.0 Flash",
+    "Ituran · salesbo · Análise Automatizada — Azure OpenAI",
   );
 
   // ── Summary box ────────────────────────────────────────────────────────────
@@ -587,7 +508,7 @@ export function exportThreatReportPdf(report: ThreatReport) {
 
   // ── Gemini Narrative ───────────────────────────────────────────────────────
   y = checkPage(doc, y, 40);
-  y = section(doc, y, "Análise IA — Gemini 2.0 Flash");
+  y = section(doc, y, "Análise IA — Azure OpenAI");
 
   const narrativeLines = report.narrative.split("\n").filter((l) => l.trim() !== "");
   for (const line of narrativeLines) {
@@ -633,7 +554,7 @@ export function exportThreatReportPdf(report: ThreatReport) {
   doc.setFont("helvetica", "italic");
   doc.setFontSize(7);
   doc.setTextColor(GRAY);
-  doc.text("Esta análise foi gerada automaticamente por Gemini 2.0 Flash e deve ser revisada por um analista de segurança.", 14, y, { maxWidth: 182 });
+  doc.text("Esta análise foi gerada automaticamente por Azure OpenAI e deve ser revisada por um analista de segurança.", 14, y, { maxWidth: 182 });
 
   footers(doc, "Relatório de Ameaças", n);
   doc.save(`relatorio-ameacas-${stamp()}.pdf`);

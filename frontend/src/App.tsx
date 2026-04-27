@@ -1,52 +1,61 @@
 import { useState } from "react";
-import { LayoutDashboard, List, ShieldAlert, ShieldCheck, Globe, BarChart2, Flame, FileWarning, Layers, Cpu, Eye } from "lucide-react";
+import { LayoutDashboard, List, ShieldAlert, Globe, BarChart2, Flame, FileWarning, Layers, Eye, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { Dashboard } from "@/components/Dashboard";
 import { LogsTable } from "@/components/LogsTable";
 import { AuthErrorAnalysis } from "@/components/AuthErrorAnalysis";
-import { SecurityAnalysis } from "@/components/SecurityAnalysis";
 import { KongAuthAnalysis } from "@/components/KongAuthAnalysis";
 import { DatadogAnalysis } from "@/components/DatadogAnalysis";
 import { GoCacheAnalysis } from "@/components/GoCacheAnalysis";
 import { ReportAnalysis } from "@/components/ReportAnalysis";
 import { KubernetesAnalysis } from "@/components/KubernetesAnalysis";
-import { JobSchedulerAnalysis } from "@/components/JobSchedulerAnalysis";
 import { AuditAnalysis } from "@/components/AuditAnalysis";
 import { SentinelaLogo } from "@/components/SentinelaLogo";
+import { LoginPage } from "@/components/LoginPage";
+import { useAuth } from "@/hooks/useAuth";
 
-type Page = "dashboard" | "logs" | "auth-errors" | "security" | "kong-auth" | "datadog" | "gocache" | "report" | "kubernetes" | "jobscheduler" | "audit";
+type Page = "dashboard" | "logs" | "auth-errors" | "kong-auth" | "datadog" | "gocache" | "report" | "kubernetes" | "audit";
 
 const NAV = [
   { id: "dashboard"   as Page, label: "Dashboard",              icon: LayoutDashboard },
   { id: "logs"        as Page, label: "Eventos",                icon: List },
   { id: "auth-errors" as Page, label: "Falhas de Autenticação", icon: ShieldAlert },
   { id: "kong-auth"   as Page, label: "Kong Auth",              icon: Globe },
-  { id: "security"    as Page, label: "Segurança",              icon: ShieldCheck },
   { id: "datadog"     as Page, label: "Datadog",                icon: BarChart2 },
   { id: "gocache"      as Page, label: "GoCache WAF",            icon: Flame },
   { id: "report"       as Page, label: "Relatório de Ameaças",   icon: FileWarning },
   { id: "kubernetes"   as Page, label: "Kubernetes",             icon: Layers },
-  { id: "jobscheduler" as Page, label: "JobScheduler",           icon: Cpu },
   { id: "audit"        as Page, label: "Auditoria",              icon: Eye },
 ];
 
 export default function App() {
   const [page, setPage] = useState<Page>("dashboard");
+  const { session, loading, signIn, signInWithMicrosoft, signOut } = useAuth();
 
   const PageTitle: Record<Page, string> = {
     dashboard:    "Dashboard",
     logs:         "Eventos",
     "auth-errors":"Análise — Falhas de Autenticação",
     "kong-auth":  "Análise — Kong Auth Request",
-    security:     "Análise de Segurança",
     datadog:      "Datadog — Infraestrutura & Monitores",
     gocache:      "GoCache WAF — Proteção & Ataques",
     report:       "Relatório de Ameaças Cibernéticas",
     kubernetes:   "Kubernetes — Saúde do Cluster",
-    jobscheduler: "JobScheduler — Execução de Jobs",
     audit:        "Auditoria — Logs de Acesso",
   };
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-background flex items-center justify-center">
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-primary border-t-transparent" />
+      </div>
+    );
+  }
+
+  if (!session) {
+    return <LoginPage onSignIn={signIn} onSignInWithMicrosoft={signInWithMicrosoft} />;
+  }
 
   return (
     <div className="flex h-screen bg-background text-foreground">
@@ -73,8 +82,17 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="px-4 pt-2 border-t">
-          <p className="text-xs text-muted-foreground">integra-prd</p>
+        <div className="px-3 pt-2 border-t space-y-2">
+          <p className="text-xs text-muted-foreground truncate" title={session.user.email}>
+            {session.user.email}
+          </p>
+          <button
+            onClick={() => signOut()}
+            className="w-full flex items-center gap-2 px-3 py-1.5 rounded-md text-xs text-muted-foreground hover:bg-accent hover:text-foreground transition-colors"
+          >
+            <LogOut className="h-3.5 w-3.5 shrink-0" />
+            Sair
+          </button>
         </div>
       </aside>
 
@@ -87,12 +105,10 @@ export default function App() {
           {page === "logs"        && <LogsTable />}
           {page === "auth-errors" && <AuthErrorAnalysis />}
           {page === "kong-auth"   && <KongAuthAnalysis />}
-          {page === "security"    && <SecurityAnalysis />}
           {page === "datadog"     && <DatadogAnalysis />}
           {page === "gocache"      && <GoCacheAnalysis />}
           {page === "report"       && <ReportAnalysis />}
           {page === "kubernetes"   && <KubernetesAnalysis />}
-          {page === "jobscheduler" && <JobSchedulerAnalysis />}
           {page === "audit"        && <AuditAnalysis />}
         </div>
       </main>

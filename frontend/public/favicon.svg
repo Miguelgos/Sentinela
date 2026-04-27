@@ -1,0 +1,34 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="50%" r="50%">
+      <stop offset="0%" stop-color="#0F2044"/>
+      <stop offset="100%" stop-color="#07091A"/>
+    </radialGradient>
+    <linearGradient id="sweep" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0077C2" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#00A651" stop-opacity="0.9"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background circle -->
+  <circle cx="16" cy="16" r="16" fill="url(#bg)"/>
+
+  <!-- Radar rings -->
+  <circle cx="16" cy="16" r="13" fill="none" stroke="#0077C2" stroke-width="0.8" opacity="0.4"/>
+  <circle cx="16" cy="16" r="9"  fill="none" stroke="#0077C2" stroke-width="0.8" opacity="0.55"/>
+  <circle cx="16" cy="16" r="5"  fill="none" stroke="#0077C2" stroke-width="0.8" opacity="0.7"/>
+
+  <!-- Crosshair -->
+  <line x1="3"  y1="16" x2="29" y2="16" stroke="#0077C2" stroke-width="0.6" opacity="0.35"/>
+  <line x1="16" y1="3"  x2="16" y2="29" stroke="#0077C2" stroke-width="0.6" opacity="0.35"/>
+
+  <!-- Sweep wedge (45° arc in Q1) -->
+  <path d="M 16 16 L 29 16 A 13 13 0 0 0 25.2 6.8 Z" fill="url(#sweep)" opacity="0.85"/>
+
+  <!-- Blip (detected target) -->
+  <circle cx="22" cy="10.5" r="1.6" fill="#00A651"/>
+  <circle cx="22" cy="10.5" r="3"   fill="none" stroke="#00A651" stroke-width="0.8" opacity="0.55"/>
+
+  <!-- Center dot -->
+  <circle cx="16" cy="16" r="1.5" fill="#00A651"/>
+</svg>

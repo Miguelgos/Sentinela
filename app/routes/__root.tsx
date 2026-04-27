@@ -20,6 +20,9 @@ export const Route = createRootRouteWithContext<RouterContext>()({
       { name: "viewport", content: "width=device-width, initial-scale=1" },
       { title: "Sentinela · Ituran" },
     ],
+    links: [
+      { rel: "icon", type: "image/svg+xml", href: "/sentinela/favicon.svg" },
+    ],
   }),
   component: RootComponent,
 });
