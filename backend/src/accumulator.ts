@@ -134,7 +134,7 @@ export async function initAccumulator(): Promise<void> {
     const sinceDate = new Date(Date.now() - RETENTION_MS);
     console.log(`[accumulator] full sync do Seq desde ${sinceDate.toISOString().slice(0, 10)}`);
 
-    const { events: newEvents, firstId } = await fetchFromSeq(sinceDate);
+    const { events: newEvents, firstId } = await fetchFromSeq(sinceDate, 50_000);
 
     if (newEvents.length > 0) {
       addToStore(newEvents);

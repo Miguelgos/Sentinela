@@ -12,4 +12,5 @@ dotenv.config({ path: path.resolve(__dirname, "../backend/.env") });
 const { initAccumulator } = await import("../backend/src/accumulator");
 await initAccumulator().catch(console.error);
 
-export default createStartHandler(defaultStreamHandler);
+const fetch = createStartHandler(defaultStreamHandler);
+export default { fetch };
