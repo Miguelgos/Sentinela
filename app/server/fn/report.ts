@@ -5,6 +5,8 @@ import { gcFetch } from "../../../backend/src/lib/gcClient";
 import { ddFetch } from "../../../backend/src/lib/ddClient";
 import { aiNarrative } from "../../../backend/src/lib/aiClient";
 import { grafanaPromQuery, grafanaFiringAlerts } from "../../../backend/src/lib/grafanaClient";
+import { lokiQueryRange } from "../../../backend/src/lib/lokiClient";
+import type { LokiStream } from "../../../backend/src/lib/lokiClient";
 
 type RiskLevel = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";
 
@@ -61,12 +63,16 @@ function detectTool(ua: string): string {
 export const getThreatReport = createServerFn({ method: "GET" }).handler(async () => {
   const now    = Math.floor(Date.now() / 1000);
   const from24 = now - 86400;
+  const toNsLoki   = Date.now() * 1_000_000;
+  const fromNsLoki = (Date.now() - 86_400_000) * 1_000_000;
 
   const [
     seqResult, ddMonitorsResult, ddIncidentsResult,
     gcWafResult, gcBotResult, gcFirewallResult,
     ddInfraResult,
     grafanaAlertsResult, grafanaDownResult,
+    lokiIntegraResult, lokiC360Result, lokiFsResult,
+    ddSloResult,
   ] = await Promise.allSettled([
     Promise.resolve(getEvents()),
     ddFetch("/api/v1/monitor?with_downtimes=false&page=0&page_size=100"),
@@ -87,6 +93,10 @@ export const getThreatReport = createServerFn({ method: "GET" }).handler(async (
     ]),
     grafanaFiringAlerts(),
     grafanaPromQuery('kube_deployment_status_replicas_available{namespace="integra-prd"} == 0'),
+    lokiQueryRange('{app="Integra",log_type="audit"}',      fromNsLoki, toNsLoki, 500),
+    lokiQueryRange('{app="customer360",log_type="audit"}',  fromNsLoki, toNsLoki, 500),
+    lokiQueryRange('{app="fieldservice",log_type="audit"}', fromNsLoki, toNsLoki, 500),
+    ddFetch("/api/v1/slo?limit=100"),
   ]);
 
   const seqOk = seqResult.status === "fulfilled";
@@ -157,6 +167,69 @@ export const getThreatReport = createServerFn({ method: "GET" }).handler(async (
     if (e.country_code) countryMap[e.country_code] = (countryMap[e.country_code] ?? 0) + 1;
   }
   const topCountries = Object.entries(countryMap).sort((a, b) => b[1] - a[1]).slice(0, 5);
+
+  // ── Loki audit processing ─────────────────────────────────────────────────
+  interface AuditSummary {
+    service: string; total: number; unmasked: number;
+    externalIPs: string[]; topUsers: { userId: string; count: number }[];
+  }
+
+  function processLokiAudit(service: string, result: PromiseSettledResult<unknown>): AuditSummary {
+    const summary: AuditSummary = { service, total: 0, unmasked: 0, externalIPs: [], topUsers: [] };
+    if (result.status !== "fulfilled") return summary;
+    const streams = result.value as LokiStream[];
+    const userCount: Record<string, number> = {};
+    for (const stream of streams) {
+      for (const [, line] of stream.values) {
+        summary.total++;
+        try {
+          const outer = JSON.parse(line) as Record<string, unknown>;
+          const fields = (service === "customer360" && typeof outer.Message === "string")
+            ? JSON.parse(outer.Message) as Record<string, unknown>
+            : outer;
+          const userId = String(fields.CD_USUARIO ?? "");
+          if (userId) userCount[userId] = (userCount[userId] ?? 0) + 1;
+          const ip = String(fields.IP_USUARIO ?? "").replace(/^::ffff:/, "");
+          if (ip && !ip.startsWith("10.") && !ip.startsWith("172.") && !ip.startsWith("192.168.") && ip !== "127.0.0.1" && ip !== "::1" && ip !== "") {
+            summary.externalIPs.push(ip);
+          }
+          const jsParams = fields.JS_PARAMETROS;
+          if (jsParams) {
+            try {
+              const p = typeof jsParams === "string" ? JSON.parse(jsParams) as Record<string, unknown> : jsParams as Record<string, unknown>;
+              if (p.ViewMaskedData === true || p.ViewMaskedData === "true") summary.unmasked++;
+            } catch {
+              if (typeof jsParams === "string" && jsParams.includes("ViewMaskedData") && jsParams.includes("true")) summary.unmasked++;
+            }
+          }
+        } catch { /* skip malformed */ }
+      }
+    }
+    summary.topUsers = Object.entries(userCount)
+      .map(([userId, count]) => ({ userId, count }))
+      .sort((a, b) => b.count - a.count).slice(0, 5);
+    summary.externalIPs = [...new Set(summary.externalIPs)].slice(0, 10);
+    return summary;
+  }
+
+  const auditSummaries = [
+    processLokiAudit("Integra",      lokiIntegraResult),
+    processLokiAudit("customer360",  lokiC360Result),
+    processLokiAudit("fieldservice", lokiFsResult),
+  ];
+  const auditTotal    = auditSummaries.reduce((s, a) => s + a.total, 0);
+  const auditUnmasked = auditSummaries.reduce((s, a) => s + a.unmasked, 0);
+  const auditExternalIPs = [...new Set(auditSummaries.flatMap(a => a.externalIPs))];
+
+  // ── SLO processing ────────────────────────────────────────────────────────
+  type SloEntry = { name: string; status: { error_budget_remaining?: number } };
+  const slos = ddSloResult.status === "fulfilled"
+    ? ((ddSloResult.value as Record<string, unknown>)?.data ?? []) as SloEntry[]
+    : [];
+  const breachedSlos = slos.filter(s => {
+    const rem = s.status?.error_budget_remaining;
+    return typeof rem === "number" && rem < 0.1;
+  });
 
   const findings: CorrelatedThreat[] = [];
 
@@ -388,6 +461,48 @@ export const getThreatReport = createServerFn({ method: "GET" }).handler(async (
     });
   }
 
+  // Rule 15: AUDIT_ANOMALY
+  const auditHighVolume = auditSummaries.flatMap(s =>
+    s.topUsers.filter(u => u.count > 200).map(u => `${u.userId} (${s.service}): ${u.count} acessos`)
+  );
+  if (auditUnmasked > 30 || auditHighVolume.length > 0) {
+    findings.push({
+      rule:        "AUDIT_ANOMALY",
+      title:       "Anomalia de Acesso a Dados Sensíveis",
+      description: `${auditUnmasked} acessos a dados reais (desmascarados) detectados na auditoria de ${auditSummaries.filter(s => s.total > 0).map(s => s.service).join(", ")}.`,
+      risk:        auditUnmasked > 200 ? "HIGH" : "MEDIUM",
+      evidence:    [
+        ...auditSummaries.map(s => `${s.service}: ${s.total} eventos auditoria, ${s.unmasked} dados reais`),
+        ...auditHighVolume.slice(0, 3),
+      ],
+      indicators:  auditHighVolume.slice(0, 5).map(u => u.split(" ")[0]),
+    });
+  }
+
+  // Rule 16: EXTERNAL_AUDIT_IP
+  if (auditExternalIPs.length > 0) {
+    findings.push({
+      rule:        "EXTERNAL_AUDIT_IP",
+      title:       "Acessos a Serviços via IPs Externos",
+      description: `${auditExternalIPs.length} IP(s) externo(s) detectado(s) nos logs de auditoria (Integra, customer360, fieldservice).`,
+      risk:        "HIGH",
+      evidence:    auditExternalIPs.slice(0, 5).map(ip => `IP externo: ${ip}`),
+      indicators:  auditExternalIPs.slice(0, 5),
+    });
+  }
+
+  // Rule 17: SLO_BREACH
+  if (breachedSlos.length > 0) {
+    findings.push({
+      rule:        "SLO_BREACH",
+      title:       "SLOs com Budget de Erros Esgotado",
+      description: `${breachedSlos.length} SLO(s) com budget de erros abaixo de 10% no Datadog.`,
+      risk:        "HIGH",
+      evidence:    breachedSlos.slice(0, 5).map(s => `${s.name}: ${Math.round((s.status?.error_budget_remaining ?? 0) * 100)}% budget restante`),
+      indicators:  breachedSlos.slice(0, 5).map(s => s.name),
+    });
+  }
+
   const overallRisk = maxRisk(findings);
 
   const summaryLines = findings.length > 0
@@ -411,12 +526,18 @@ export const getThreatReport = createServerFn({ method: "GET" }).handler(async (
     podRestartHosts.length ? `Pods reiniciando: ${podRestartHosts.length}` : "",
   ].filter(Boolean).join(" | ");
 
+  const auditSummaryLine = auditSummaries
+    .filter(s => s.total > 0)
+    .map(s => `${s.service}: ${s.total} eventos, ${s.unmasked} dados reais`)
+    .join(" | ") || "sem dados";
+
   const prompt =
-`Você é um analista de segurança cibernética sênior. Com base nos dados coletados de um sistema de monitoramento empresarial (Ituran/salesbo) nas últimas 24 horas, elabore um relatório executivo em português (máximo 400 palavras).
+`Você é um analista de segurança cibernética sênior. Com base nos dados coletados do ecossistema Ituran (plataforma integra-prd) nas últimas 24 horas, elabore um relatório executivo em português (máximo 400 palavras).
 
 MÉTRICAS DO PERÍODO:
 - Logs Seq: ${seqEvents.length} eventos (${authFails.length} falhas de autenticação)
-- Datadog: ${ddSummary}
+- Auditoria (Integra, customer360, fieldservice): ${auditTotal} eventos — ${auditSummaryLine}${auditExternalIPs.length > 0 ? ` — ${auditExternalIPs.length} IPs externos` : ""}
+- Datadog: ${ddSummary}${breachedSlos.length > 0 ? ` | SLOs em breach: ${breachedSlos.length}` : ""}
 - GoCache WAF/Bot/Firewall: ${gcSummary}
 - Kubernetes: ${criticalAlerts.length} alertas críticos, ${downDeps.length} deployments parados
 - Nível de risco geral: ${overallRisk}
@@ -457,6 +578,7 @@ Seja direto e objetivo. Evite jargão técnico excessivo.`;
       seq:     { ok: seqOk,  events:  seqEvents.length },
       datadog: { ok: ddOk,   alerts:  alertMonitors.length },
       gocache: { ok: gcOk,   blocked: gcBlockedTotal },
+      audit:   { ok: auditTotal > 0, events: auditTotal },
     },
   };
 });
