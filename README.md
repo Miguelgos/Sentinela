@@ -4,7 +4,7 @@ Dashboard web de inteligência de logs e segurança para o serviço `salesbo` da
 
 ## Contexto
 
-O **Sentinela** monitora em tempo real os eventos do serviço `salesbo` (Sales Backoffice) publicados no Seq em `https://seq-prd.ituran.sp`. Consome esses eventos via polling contínuo, persiste localmente em SQLite e mantém uma store in-memory para consultas rápidas. As análises cobrem os seguintes padrões:
+O **Sentinela** monitora em tempo real os eventos do serviço `salesbo` (Sales Backoffice) publicados no Seq em `https://seq-prd.ituran.sp`. Consome esses eventos via polling contínuo e mantém uma store in-memory para consultas rápidas. As análises cobrem os seguintes padrões:
 
 1. **GUID de Cotação vazio** — endpoint `Quote/PrintItens` chamado com `GUID_COTACAO: 00000000-0000-0000-0000-000000000000`
 2. **Falhas de autenticação** — endpoint `/connect/token` com fluxo ResourceOwner retornando `Unauthorized`
@@ -12,7 +12,22 @@ O **Sentinela** monitora em tempo real os eventos do serviço `salesbo` (Sales B
 4. **Análise de Segurança** — findings de segurança com severidade (Critical/High/Medium/Low)
 5. **Datadog** — monitores, logs, hosts, SLOs, downtimes, incidentes, métricas IIS, SQL Server e infra
 6. **GoCache WAF** — eventos WAF, firewall, bot mitigation, categorias de ataque, países, ferramentas ofensivas
-7. **Relatório de Ameaças** — 12 regras de correlação cruzada (Seq + Datadog + GoCache) + narrativa executiva Claude (Anthropic)
+7. **Kubernetes / JobScheduler** — métricas Prometheus via Grafana (`grafana-prd.ituran.sp`)
+8. **Auditoria** — logs do `integra-audit` via Loki/Grafana (~140k eventos/24h)
+9. **Relatório de Ameaças** — 15 regras de correlação cruzada (Seq + Datadog + GoCache + Grafana) + narrativa Azure OpenAI
+
+## Documentação
+
+> A documentação foi reorganizada em `docs/` na Fase 9. O arquivo `docs/spec.md` foi mantido
+> para compatibilidade; a estrutura canônica está nos diretórios abaixo.
+
+| Diretório | Conteúdo |
+|-----------|----------|
+| [`docs/architecture/`](docs/architecture/) | Visão geral, modelo de dados, polling do Seq, integrações |
+| [`docs/specs/`](docs/specs/) | Spec de cada página (Dashboard, Auditoria, Kubernetes, etc.) |
+| [`docs/deploy/`](docs/deploy/) | Deploy em Kubernetes (cluster-bra-prd, namespace integra-prd) |
+| [`docs/adr/`](docs/adr/) | Architecture Decision Records (ADR-001 a ADR-014) |
+| [`docs/refactor-plan.md`](docs/refactor-plan.md) | Plano de simplificação (Fases 1-9) |
 
 ## Stack
 
