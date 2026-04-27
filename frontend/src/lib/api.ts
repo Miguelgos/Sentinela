@@ -1,6 +1,29 @@
-import axios from "axios";
+// ── Server function imports ───────────────────────────────────────────────────
+import {
+  listEvents,
+  getEvent,
+  getStatsSummary,
+  getTimeline,
+  getEmptyGuidTimeline,
+  getAuthErrorStats,
+  getSecurityStats,
+  getKongAuthStats,
+} from "../../../app/server/fn/events";
+import { lookupPessoa } from "../../../app/server/fn/pessoa";
+import {
+  getDatadogOverview,
+  getDatadogMetrics,
+  getDatadogInfra,
+} from "../../../app/server/fn/datadog";
+import { getGocacheOverview } from "../../../app/server/fn/gocache";
+import { getThreatReport } from "../../../app/server/fn/report";
+import {
+  getGrafanaKubernetes,
+  getGrafanaJobScheduler,
+} from "../../../app/server/fn/grafana";
+import { getAuditOverview } from "../../../app/server/fn/audit";
 
-const api = axios.create({ baseURL: "/api" });
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export interface DbEvent {
   id: string;
@@ -15,7 +38,7 @@ export interface DbEvent {
   environment: string | null;
   request_path: string | null;
   source_context: string | null;
-  raw_data: Record<string, unknown>;
+  raw_data: Record<string, string | number | boolean | null>;
 }
 
 export interface EventsResponse {
@@ -221,42 +244,6 @@ export interface AuditOverview {
   }[];
 }
 
-export const eventsApi = {
-  list: (filters: EventFilters = {}) =>
-    api.get<EventsResponse>("/events", { params: filters }).then((r) => r.data),
-
-  get: (id: string) => api.get<DbEvent>(`/events/${id}`).then((r) => r.data),
-
-  stats: () => api.get<StatsSummary>("/events/stats/summary").then((r) => r.data),
-
-  timeline: (hours?: number) =>
-    api.get<TimelineEntry[]>("/events/stats/timeline", { params: { hours } }).then((r) => r.data),
-
-  emptyGuidTimeline: () =>
-    api.get<{ hour: string; count: string; unique_users: string }[]>(
-      "/events/stats/empty-guid-timeline"
-    ).then((r) => r.data),
-
-  authErrorStats: () => api.get<AuthErrorStats>("/events/stats/auth-errors").then((r) => r.data),
-
-  securityStats: () => api.get<SecurityStats>("/events/stats/security").then((r) => r.data),
-
-  kongAuthStats: () => api.get<KongAuthStats>("/events/stats/kong-auth").then((r) => r.data),
-
-  datadogOverview: () => api.get<DatadogOverview>("/datadog/overview").then((r) => r.data),
-
-  gocacheOverview: () => api.get<GoCacheOverview>("/gocache/overview").then((r) => r.data),
-
-  datadogMetrics: () => api.get<DatadogMetrics>("/datadog/metrics").then((r) => r.data),
-
-  datadogInfra: () => api.get<DatadogInfra>("/datadog/infra").then((r) => r.data),
-
-  grafanaKubernetes: () => api.get<GrafanaKubernetes>("/grafana/kubernetes").then(r => r.data),
-  grafanaJobScheduler: () => api.get<GrafanaJobScheduler>("/grafana/jobscheduler").then(r => r.data),
-
-  auditOverview: () => api.get<AuditOverview>("/audit/overview").then(r => r.data),
-};
-
 export interface GrafanaPod {
   name: string;
   cpuPct: number;
@@ -327,15 +314,33 @@ export interface ThreatReport {
   };
 }
 
+// ── API objects ───────────────────────────────────────────────────────────────
+
+export const eventsApi = {
+  list:               (filters: EventFilters = {}) => listEvents({ data: filters }),
+  get:                (id: string)                  => getEvent({ data: { id } }),
+  stats:              ()                            => getStatsSummary(),
+  timeline:           (hours?: number)              => getTimeline({ data: { hours } }),
+  emptyGuidTimeline:  ()                            => getEmptyGuidTimeline(),
+  authErrorStats:     ()                            => getAuthErrorStats(),
+  securityStats:      ()                            => getSecurityStats(),
+  kongAuthStats:      ()                            => getKongAuthStats(),
+  datadogOverview:    ()                            => getDatadogOverview(),
+  gocacheOverview:    ()                            => getGocacheOverview(),
+  datadogMetrics:     ()                            => getDatadogMetrics(),
+  datadogInfra:       ()                            => getDatadogInfra(),
+  grafanaKubernetes:  ()                            => getGrafanaKubernetes(),
+  grafanaJobScheduler:()                            => getGrafanaJobScheduler(),
+  auditOverview:      ()                            => getAuditOverview(),
+};
+
 export const reportApi = {
-  threatReport: () => api.get<ThreatReport>("/report/threat").then((r) => r.data),
+  threatReport: () => getThreatReport(),
 };
 
 export const pessoaApi = {
   lookup: (userIds: string[]): Promise<Record<string, string>> =>
-    api.get<Record<string, string>>("/pessoa/lookup", {
-      params: { userIds: userIds.join(",") },
-    }).then((r) => r.data),
+    lookupPessoa({ data: { userIds: userIds.join(",") } }),
 };
 
 export const queryKeys = {
