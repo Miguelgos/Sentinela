@@ -169,13 +169,26 @@ function checkPage(doc: jsPDF, y: number, needed = 30): number {
   return y;
 }
 
-function table(doc: jsPDF, y: number, head: string[][], body: (string | number)[][], opts?: { color?: string; fontSize?: number }) {
+function createDoc(orientation: "portrait" | "landscape" = "portrait") {
+  return new jsPDF({ orientation, unit: "mm", format: "a4" });
+}
+
+type TableOpts = {
+  color?: string;
+  fontSize?: number;
+  columnStyles?: Record<number, object>;
+  didParseCell?: (data: Parameters<NonNullable<Parameters<typeof autoTable>[1]["didParseCell"]>>[0]) => void;
+};
+
+function table(doc: jsPDF, y: number, head: string[][], body: (string | number)[][], opts?: TableOpts) {
   autoTable(doc, {
     startY: y,
     head,
     body,
     styles: { fontSize: opts?.fontSize ?? 7.5, cellPadding: 2 },
     headStyles: { fillColor: opts?.color ?? BRAND, textColor: "#fff", fontStyle: "bold" },
+    ...(opts?.columnStyles ? { columnStyles: opts.columnStyles } : {}),
+    ...(opts?.didParseCell ? { didParseCell: opts.didParseCell } : {}),
     margin: { left: 14, right: 14 },
   });
   return (doc as LastTable).lastAutoTable.finalY + 6;
@@ -207,7 +220,7 @@ function summaryBox(doc: jsPDF, y: number, cols: [string, string, string?][]) {
 
 // ── Kong Auth ──────────────────────────────────────────────────────────────
 export function exportKongAuthPdf(stats: KongAuthStats) {
-  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const doc = createDoc();
   const { startY, now: n } = header(doc, "Kong Auth Request — Análise de Falhas");
   const { summary, timeline, topUsers, topIPs, credentialStuffing, serverErrors, recentFailures } = stats;
 
@@ -280,7 +293,7 @@ export function exportDashboardPdf(
   names: Record<string, string>,
   authStats: AuthErrorStats | null,
 ) {
-  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const doc = createDoc();
   const { startY, now: n } = header(doc, "Dashboard — Resumo de Eventos");
 
   const emptyGuid = parseInt(stats.guidBreakdown?.empty_guid || "0");
@@ -362,7 +375,7 @@ export function exportErrorAnalysisPdf(
   timeline: { hour: string; count: string; unique_users: string }[],
   names: Record<string, string>,
 ) {
-  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const doc = createDoc();
   const { startY, now: n } = header(doc, "Análise — GUID Cotação Vazio");
 
   const uniqueUsers = new Set(events.data.map((e) => e.user_id).filter(Boolean)).size;
@@ -416,7 +429,7 @@ export function exportErrorAnalysisPdf(
 
 // ── Auth Errors ────────────────────────────────────────────────────────────
 export function exportAuthErrorPdf(stats: AuthErrorStats) {
-  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const doc = createDoc();
   const { startY, now: n } = header(doc, "Falhas de Autenticação — /connect/token");
 
   const peak = stats.timeline.reduce((m, t) => parseInt(t.count) > parseInt(m.count) ? t : m,
@@ -474,7 +487,7 @@ export function exportAuthErrorPdf(stats: AuthErrorStats) {
 
 // ── Security ───────────────────────────────────────────────────────────────
 export function exportSecurityPdf(stats: SecurityStats) {
-  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const doc = createDoc();
   const { startY, now: n } = header(doc, "Análise de Segurança — salesbo");
 
   const findings = [
@@ -507,29 +520,19 @@ export function exportSecurityPdf(stats: SecurityStats) {
   // All findings table
   y = checkPage(doc, y, 40);
   y = section(doc, y, "Sumário de Achados de Segurança");
-  autoTable(doc, {
-    startY: y,
-    head: [["ID", "Severidade", "Achado", "Detalhe", "Ação Recomendada"]],
-    body: findings.map((f) => [f.id, f.sev, f.title, f.detail, f.action]),
-    styles: { fontSize: 7, cellPadding: 2 },
-    headStyles: { fillColor: BRAND, textColor: "#fff", fontStyle: "bold" },
-    columnStyles: {
-      0: { cellWidth: 18 },
-      1: { cellWidth: 18 },
-      2: { cellWidth: 38 },
-      3: { cellWidth: 60 },
-      4: { cellWidth: 48 },
-    },
-    didParseCell: (data) => {
-      if (data.column.index === 1 && data.section === "body") {
-        const sev = data.cell.text[0] as string;
-        data.cell.styles.textColor = sevColor[sev] ?? GRAY;
-        data.cell.styles.fontStyle = "bold";
-      }
-    },
-    margin: { left: 14, right: 14 },
-  });
-  y = (doc as LastTable).lastAutoTable.finalY + 6;
+  y = table(doc, y, [["ID", "Severidade", "Achado", "Detalhe", "Ação Recomendada"]],
+    findings.map((f) => [f.id, f.sev, f.title, f.detail, f.action]),
+    {
+      fontSize: 7,
+      columnStyles: { 0: { cellWidth: 18 }, 1: { cellWidth: 18 }, 2: { cellWidth: 38 }, 3: { cellWidth: 60 }, 4: { cellWidth: 48 } },
+      didParseCell: (data) => {
+        if (data.column.index === 1 && data.section === "body") {
+          const sev = data.cell.text[0] as string;
+          data.cell.styles.textColor = sevColor[sev] ?? GRAY;
+          data.cell.styles.fontStyle = "bold";
+        }
+      },
+    });
 
   // Brute force detail
   if (stats.bruteForce.length > 0) {
@@ -571,7 +574,7 @@ const RISK_COLOR: Record<RiskLevel, string> = {
 };
 
 export function exportThreatReportPdf(report: ThreatReport) {
-  const doc  = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const doc  = createDoc();
   const rLvl = report.riskLevel;
   const { startY, now: n } = header(
     doc,
@@ -592,26 +595,23 @@ export function exportThreatReportPdf(report: ThreatReport) {
   // ── Sources table ──────────────────────────────────────────────────────────
   y = checkPage(doc, y, 35);
   y = section(doc, y, "Fontes de Dados");
-  autoTable(doc, {
-    startY: y,
-    head: [["Fonte", "Status", "Período", "Métrica"]],
-    body: [
+  y = table(doc, y,
+    [["Fonte", "Status", "Período", "Métrica"]],
+    [
       ["Seq (Logs de Aplicação)", report.sources.seq.ok     ? "OK" : "ERRO", "Acumulado",  `${report.sources.seq.events.toLocaleString("pt-BR")} eventos`],
       ["Datadog (Monitores)",     report.sources.datadog.ok ? "OK" : "ERRO", "Tempo real", `${report.sources.datadog.alerts} monitor(es) em alerta`],
       ["GoCache WAF",             report.sources.gocache.ok ? "OK" : "ERRO", "Últimas 24h", `${report.sources.gocache.blocked.toLocaleString("pt-BR")} eventos bloqueados`],
     ],
-    styles:     { fontSize: 8, cellPadding: 2.5 },
-    headStyles: { fillColor: BRAND, textColor: "#fff", fontStyle: "bold" },
-    columnStyles: { 1: { cellWidth: 22 } },
-    didParseCell: (data) => {
-      if (data.column.index === 1 && data.section === "body") {
-        data.cell.styles.textColor = data.cell.text[0] === "OK" ? GREEN : RED;
-        data.cell.styles.fontStyle = "bold";
-      }
-    },
-    margin: { left: 14, right: 14 },
-  });
-  y = (doc as LastTable).lastAutoTable.finalY + 6;
+    {
+      fontSize: 8,
+      columnStyles: { 1: { cellWidth: 22 } },
+      didParseCell: (data) => {
+        if (data.column.index === 1 && data.section === "body") {
+          data.cell.styles.textColor = data.cell.text[0] === "OK" ? GREEN : RED;
+          data.cell.styles.fontStyle = "bold";
+        }
+      },
+    });
 
   // ── Findings ───────────────────────────────────────────────────────────────
   y = checkPage(doc, y, 40);
@@ -626,34 +626,20 @@ export function exportThreatReportPdf(report: ThreatReport) {
     y += 8;
   } else {
     // Findings overview table
-    autoTable(doc, {
-      startY: y,
-      head: [["Risco", "Regra", "Título", "Descrição"]],
-      body: report.findings.map((f) => [
-        RISK_LABEL[f.risk],
-        f.rule,
-        f.title,
-        f.description,
-      ]),
-      styles:     { fontSize: 7.5, cellPadding: 2 },
-      headStyles: { fillColor: BRAND, textColor: "#fff", fontStyle: "bold" },
-      columnStyles: {
-        0: { cellWidth: 18 },
-        1: { cellWidth: 38 },
-        2: { cellWidth: 50 },
-        3: { cellWidth: 76 },
-      },
-      didParseCell: (data) => {
-        if (data.column.index === 0 && data.section === "body") {
-          const lbl = data.cell.text[0] as RiskLevel;
-          const col = Object.entries(RISK_LABEL).find(([, v]) => v === lbl)?.[0] as RiskLevel | undefined;
-          data.cell.styles.textColor = col ? RISK_COLOR[col] : GRAY;
-          data.cell.styles.fontStyle = "bold";
-        }
-      },
-      margin: { left: 14, right: 14 },
-    });
-    y = (doc as LastTable).lastAutoTable.finalY + 6;
+    y = table(doc, y,
+      [["Risco", "Regra", "Título", "Descrição"]],
+      report.findings.map((f) => [RISK_LABEL[f.risk], f.rule, f.title, f.description]),
+      {
+        columnStyles: { 0: { cellWidth: 18 }, 1: { cellWidth: 38 }, 2: { cellWidth: 50 }, 3: { cellWidth: 76 } },
+        didParseCell: (data) => {
+          if (data.column.index === 0 && data.section === "body") {
+            const lbl = data.cell.text[0] as RiskLevel;
+            const col = Object.entries(RISK_LABEL).find(([, v]) => v === lbl)?.[0] as RiskLevel | undefined;
+            data.cell.styles.textColor = col ? RISK_COLOR[col] : GRAY;
+            data.cell.styles.fontStyle = "bold";
+          }
+        },
+      });
 
     // Per-finding evidence detail
     for (const f of report.findings) {
@@ -661,15 +647,8 @@ export function exportThreatReportPdf(report: ThreatReport) {
       y = checkPage(doc, y, 30);
       const fColor = RISK_COLOR[f.risk];
       y = section(doc, y, `${RISK_LABEL[f.risk]} · ${f.title}`, fColor);
-      autoTable(doc, {
-        startY: y,
-        head: [["Evidências"]],
-        body:  f.evidence.map((ev) => [ev]),
-        styles:     { fontSize: 7.5, cellPadding: 2 },
-        headStyles: { fillColor: fColor, textColor: "#fff", fontStyle: "bold" },
-        margin: { left: 14, right: 14 },
-      });
-      y = (doc as LastTable).lastAutoTable.finalY + 4;
+      y = table(doc, y, [["Evidências"]], f.evidence.map((ev) => [ev]), { color: fColor });
+      y -= 2; // evidência usa +4 em vez de +6 — ajusta margem
     }
   }
 
