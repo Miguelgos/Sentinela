@@ -1,14 +1,19 @@
 import type { ReactNode } from "react";
 import {
   Outlet,
-  createRootRoute,
+  createRootRouteWithContext,
   HeadContent,
   Scripts,
   ScrollRestoration,
 } from "@tanstack/react-router";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "../../frontend/src/index.css";
 
-export const Route = createRootRoute({
+interface RouterContext {
+  queryClient: QueryClient;
+}
+
+export const Route = createRootRouteWithContext<RouterContext>()({
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -20,16 +25,19 @@ export const Route = createRootRoute({
 });
 
 function RootComponent() {
+  const { queryClient } = Route.useRouteContext();
   return (
-    <RootDocument>
-      <Outlet />
-    </RootDocument>
+    <QueryClientProvider client={queryClient}>
+      <RootDocument>
+        <Outlet />
+      </RootDocument>
+    </QueryClientProvider>
   );
 }
 
 function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="pt-BR">
+    <html lang="pt-BR" className="dark">
       <head>
         <HeadContent />
       </head>
