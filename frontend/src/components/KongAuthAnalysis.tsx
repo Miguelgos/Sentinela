@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import {
-  ShieldAlert, Globe, Server, User, Wifi, FileDown,
+  ShieldAlert, Globe, Server, User, Wifi, FileDown, RefreshCw,
 } from "lucide-react";
+import { useAnalysisData } from "@/hooks/useAnalysisData";
+import { AnalysisShell } from "@/components/AnalysisShell";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
 } from "recharts";
@@ -13,7 +14,7 @@ import {
   ChartContainer, ChartTooltip, ChartTooltipContent,
   ChartLegend, ChartLegendContent, type ChartConfig,
 } from "@/components/ui/chart";
-import { eventsApi, type KongAuthStats } from "@/lib/api";
+import { eventsApi } from "@/lib/api";
 
 const kongChartConfig = {
   sucessos: { label: "Sucesso (200)", color: "#22c55e" },
@@ -35,13 +36,8 @@ function StatusBadge({ code }: { code: number }) {
 }
 
 export function KongAuthAnalysis() {
-  const [stats, setStats] = useState<KongAuthStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: stats, loading, error, reload } = useAnalysisData(() => eventsApi.kongAuthStats());
   const [exporting, setExporting] = useState(false);
-
-  useEffect(() => {
-    eventsApi.kongAuthStats().then(setStats).finally(() => setLoading(false));
-  }, []);
 
   async function handleExport() {
     if (!stats) return;
@@ -53,19 +49,13 @@ export function KongAuthAnalysis() {
     }
   }
 
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i}><CardContent className="p-4"><Skeleton className="h-32 w-full" /></CardContent></Card>
-        ))}
-      </div>
-    );
-  }
-
-  if (!stats) return <p className="text-muted-foreground">Erro ao carregar dados.</p>;
-
-  const { summary, timeline, topUsers, topIPs, credentialStuffing, serverErrors, recentFailures } = stats;
+  const summary = stats?.summary;
+  const timeline = stats?.timeline ?? [];
+  const topUsers = stats?.topUsers ?? [];
+  const topIPs = stats?.topIPs ?? [];
+  const credentialStuffing = stats?.credentialStuffing ?? [];
+  const serverErrors = stats?.serverErrors ?? [];
+  const recentFailures = stats?.recentFailures ?? [];
 
   const chartData = timeline.map((t) => ({
     hora: format(new Date(t.hora), "HH:mm", { locale: ptBR }),
@@ -76,21 +66,30 @@ export function KongAuthAnalysis() {
   const internalIpFailures = recentFailures.filter((r) => isInternal(r.client_ip || ""));
 
   return (
-    <div className="space-y-6">
-      {/* Header row with export button */}
-      <div className="flex items-center justify-end">
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleExport}
-          disabled={exporting || !stats}
-          className="gap-2"
-        >
-          <FileDown className="h-4 w-4" />
-          {exporting ? "Gerando PDF…" : "Exportar PDF"}
-        </Button>
-      </div>
-
+    <AnalysisShell
+      loading={loading}
+      error={error}
+      onReload={reload}
+      action={
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={reload}>
+            <RefreshCw className="h-3.5 w-3.5 mr-1" /> Atualizar
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleExport}
+            disabled={exporting || !stats}
+            className="gap-2"
+          >
+            <FileDown className="h-4 w-4" />
+            {exporting ? "Gerando PDF…" : "Exportar PDF"}
+          </Button>
+        </div>
+      }
+    >
+      {stats && (
+      <>
       {/* Context banner */}
       <Card className="border-orange-500/30 bg-orange-500/5">
         <CardContent className="p-4">
@@ -113,11 +112,11 @@ export function KongAuthAnalysis() {
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <MetricCard label="Total Requests" value={summary.total.toLocaleString("pt-BR")} color="border-muted" />
-        <MetricCard label="Falhas" value={summary.failures.toLocaleString("pt-BR")} color="border-red-500/40" valueColor="text-red-400" />
-        <MetricCard label="Taxa de Falha" value={`${summary.failurePct}%`} color="border-orange-500/40" valueColor="text-orange-400" />
-        <MetricCard label="401 Unauthorized" value={summary.failures401.toLocaleString("pt-BR")} color="border-orange-500/30" />
-        <MetricCard label="500 Server Error" value={summary.failures500.toLocaleString("pt-BR")} color="border-red-700/40" valueColor="text-red-500" />
+        <MetricCard label="Total Requests" value={(summary?.total ?? 0).toLocaleString("pt-BR")} color="border-muted" />
+        <MetricCard label="Falhas" value={(summary?.failures ?? 0).toLocaleString("pt-BR")} color="border-red-500/40" valueColor="text-red-400" />
+        <MetricCard label="Taxa de Falha" value={`${summary?.failurePct ?? 0}%`} color="border-orange-500/40" valueColor="text-orange-400" />
+        <MetricCard label="401 Unauthorized" value={(summary?.failures401 ?? 0).toLocaleString("pt-BR")} color="border-orange-500/30" />
+        <MetricCard label="500 Server Error" value={(summary?.failures500 ?? 0).toLocaleString("pt-BR")} color="border-red-700/40" valueColor="text-red-500" />
       </div>
 
       {/* Alerts */}
@@ -372,7 +371,9 @@ export function KongAuthAnalysis() {
           </div>
         </CardContent>
       </Card>
-    </div>
+      </>
+      )}
+    </AnalysisShell>
   );
 }
 

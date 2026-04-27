@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Shield, AlertTriangle, Bot, Globe, XCircle, Flame } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Shield, AlertTriangle, Bot, Globe, Flame, RefreshCw } from "lucide-react";
+import { useAnalysisData } from "@/hooks/useAnalysisData";
+import { AnalysisShell } from "@/components/AnalysisShell";
 import {
   BarChart, Bar, XAxis, YAxis,
   LineChart, Line, CartesianGrid, Cell,
@@ -101,39 +102,25 @@ function EventsTable({ events, title, icon }: { events: GoCacheEvent[]; title: s
 }
 
 export function GoCacheAnalysis() {
-  const [data, setData] = useState<GoCacheOverview | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error, reload } = useAnalysisData(() => eventsApi.gocacheOverview());
 
-  useEffect(() => {
-    eventsApi.gocacheOverview()
-      .then(setData)
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
-  }, []);
+  return (
+    <AnalysisShell
+      loading={loading}
+      error={error}
+      onReload={reload}
+      action={
+        <Button variant="outline" size="sm" onClick={reload}>
+          <RefreshCw className="h-3.5 w-3.5 mr-1" /> Atualizar
+        </Button>
+      }
+    >
+      {data && <GoCacheContent data={data} />}
+    </AnalysisShell>
+  );
+}
 
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i}><CardContent className="p-4"><Skeleton className="h-32 w-full" /></CardContent></Card>
-        ))}
-      </div>
-    );
-  }
-
-  if (error || !data) {
-    return (
-      <Card className="border-red-500/30">
-        <CardContent className="p-6 text-center text-red-400">
-          <XCircle className="h-8 w-8 mx-auto mb-2" />
-          <p className="font-semibold">Erro ao conectar com GoCache</p>
-          <p className="text-xs text-muted-foreground mt-1">{error}</p>
-        </CardContent>
-      </Card>
-    );
-  }
-
+function GoCacheContent({ data }: { data: GoCacheOverview }) {
   const {
     summary, topIPs, topAlerts, topURIs, topHosts, recentWaf, recentFirewall, recentBot,
     totals, timeline, byCountry, attackCategories, botTypes, userAgentTools,

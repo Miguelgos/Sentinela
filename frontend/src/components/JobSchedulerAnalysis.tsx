@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, RefreshCw, XCircle, Activity, Cpu } from "lucide-react";
+import { AlertTriangle, RefreshCw, Activity, Cpu } from "lucide-react";
+import { useAnalysisData } from "@/hooks/useAnalysisData";
+import { AnalysisShell } from "@/components/AnalysisShell";
 import {
   BarChart, Bar, XAxis, YAxis,
 } from "recharts";
@@ -34,54 +34,25 @@ function truncate(str: string, maxLen: number): string {
 }
 
 export function JobSchedulerAnalysis() {
-  const [data, setData] = useState<GrafanaJobScheduler | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error, reload } = useAnalysisData(() => eventsApi.grafanaJobScheduler());
 
-  function load() {
-    setLoading(true);
-    setError(null);
-    eventsApi
-      .grafanaJobScheduler()
-      .then(setData)
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
-  }
+  return (
+    <AnalysisShell
+      loading={loading}
+      error={error}
+      onReload={reload}
+      action={
+        <Button variant="outline" size="sm" onClick={reload}>
+          <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Atualizar
+        </Button>
+      }
+    >
+      {data && <JobSchedulerContent data={data} />}
+    </AnalysisShell>
+  );
+}
 
-  useEffect(() => {
-    load();
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i}>
-            <CardContent className="p-4">
-              <Skeleton className="h-32 w-full" />
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-    );
-  }
-
-  if (error || !data) {
-    return (
-      <Card className="border-red-500/30">
-        <CardContent className="p-6 text-center text-red-400">
-          <XCircle className="h-8 w-8 mx-auto mb-2" />
-          <p className="font-semibold">Erro ao carregar dados do JobScheduler</p>
-          <p className="text-xs text-muted-foreground mt-1">{error}</p>
-          <Button variant="outline" size="sm" className="mt-3" onClick={load}>
-            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-            Tentar novamente
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
-
+function JobSchedulerContent({ data }: { data: GrafanaJobScheduler }) {
   const { providers, totals } = data;
 
   const activeProviders = providers.filter((p: GrafanaProvider) => p.activeRequests > 0).length;
@@ -107,17 +78,11 @@ export function JobSchedulerAnalysis() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Cpu className="h-5 w-5 text-blue-400" />
-          <h2 className="text-sm font-semibold text-blue-300">
-            JobScheduler — Execução de Jobs
-          </h2>
-        </div>
-        <Button variant="outline" size="sm" onClick={load}>
-          <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-          Atualizar
-        </Button>
+      <div className="flex items-center gap-2">
+        <Cpu className="h-5 w-5 text-blue-400" />
+        <h2 className="text-sm font-semibold text-blue-300">
+          JobScheduler — Execução de Jobs
+        </h2>
       </div>
 
       {/* Summary cards */}

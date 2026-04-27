@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import { EventDetail } from "@/components/EventDetail";
-import { ShieldAlert, Clock, Users, TrendingUp, User, FileDown } from "lucide-react";
+import { ShieldAlert, Clock, Users, TrendingUp, User, FileDown, RefreshCw } from "lucide-react";
+import { useAnalysisData } from "@/hooks/useAnalysisData";
+import { AnalysisShell } from "@/components/AnalysisShell";
 import { exportAuthErrorPdf } from "@/lib/exportPdf";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -35,8 +36,7 @@ function extractStatusCode(msg: string) {
 }
 
 export function AuthErrorAnalysis() {
-  const [stats, setStats] = useState<AuthErrorStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: stats, loading, error, reload } = useAnalysisData(() => eventsApi.authErrorStats());
   const [selected, setSelected] = useState<AuthErrorStats["recentEvents"][0] | null>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -45,22 +45,6 @@ export function AuthErrorAnalysis() {
     setExporting(true);
     try { exportAuthErrorPdf(stats); }
     finally { setExporting(false); }
-  }
-
-  useEffect(() => {
-    eventsApi.authErrorStats()
-      .then(setStats)
-      .finally(() => setLoading(false));
-  }, []);
-
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        {Array.from({ length: 3 }).map((_, i) => (
-          <Card key={i}><CardContent className="p-4"><Skeleton className="h-32 w-full" /></CardContent></Card>
-        ))}
-      </div>
-    );
   }
 
   const peak = (stats?.timeline || []).reduce(
@@ -79,13 +63,25 @@ export function AuthErrorAnalysis() {
 
   return (
     <>
-      <div className="space-y-6">
-        <div className="flex justify-end">
-          <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || !stats} className="gap-2">
-            <FileDown className="h-4 w-4" />
-            {exporting ? "Gerando PDF…" : "Exportar PDF"}
-          </Button>
-        </div>
+      <AnalysisShell
+        loading={loading}
+        error={error}
+        onReload={reload}
+        skeletonRows={3}
+        action={
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={reload}>
+              <RefreshCw className="h-3.5 w-3.5 mr-1" /> Atualizar
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || !stats} className="gap-2">
+              <FileDown className="h-4 w-4" />
+              {exporting ? "Gerando PDF…" : "Exportar PDF"}
+            </Button>
+          </div>
+        }
+      >
+        {stats && (
+        <>
         <Card className="border-red-500/30 bg-red-500/5">
           <CardContent className="p-4">
             <div className="flex items-start gap-3">
@@ -282,7 +278,9 @@ export function AuthErrorAnalysis() {
             </div>
           </CardContent>
         </Card>
-      </div>
+        </>
+        )}
+      </AnalysisShell>
 
       {selected && (
         <EventDetail

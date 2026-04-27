@@ -1,18 +1,17 @@
-import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import {
   Eye,
   RefreshCw,
-  XCircle,
   AlertTriangle,
   ShieldAlert,
   Globe,
   Users,
 } from "lucide-react";
 import { eventsApi, type AuditOverview } from "@/lib/api";
+import { useAnalysisData } from "@/hooks/useAnalysisData";
+import { AnalysisShell } from "@/components/AnalysisShell";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -50,61 +49,29 @@ function ServiceBadge({ service }: { service: string }) {
   );
 }
 
-// ─── loading skeleton ─────────────────────────────────────────────────────────
-
-function LoadingSkeleton() {
-  return (
-    <div className="space-y-4">
-      {Array.from({ length: 5 }).map((_, i) => (
-        <Card key={i}>
-          <CardContent className="p-4">
-            <Skeleton className="h-32 w-full" />
-          </CardContent>
-        </Card>
-      ))}
-    </div>
-  );
-}
-
 // ─── main component ──────────────────────────────────────────────────────────
 
 export function AuditAnalysis() {
-  const [data, setData] = useState<AuditOverview | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const { data, loading, error, reload } = useAnalysisData(() => eventsApi.auditOverview());
 
-  function load() {
-    setLoading(true);
-    setError(null);
-    eventsApi
-      .auditOverview()
-      .then(setData)
-      .catch((e) => setError(String(e)))
-      .finally(() => setLoading(false));
-  }
+  return (
+    <AnalysisShell
+      loading={loading}
+      error={error}
+      onReload={reload}
+      skeletonRows={5}
+      action={
+        <Button variant="outline" size="sm" onClick={reload}>
+          <RefreshCw className="h-3.5 w-3.5 mr-1.5" /> Atualizar
+        </Button>
+      }
+    >
+      {data && <AuditContent data={data} />}
+    </AnalysisShell>
+  );
+}
 
-  useEffect(() => {
-    load();
-  }, []);
-
-  if (loading) return <LoadingSkeleton />;
-
-  if (error || !data) {
-    return (
-      <Card className="border-red-500/30">
-        <CardContent className="p-6 text-center text-red-400">
-          <XCircle className="h-8 w-8 mx-auto mb-2" />
-          <p className="font-semibold">Erro ao carregar dados de auditoria</p>
-          <p className="text-xs text-muted-foreground mt-1">{error}</p>
-          <Button variant="outline" size="sm" className="mt-3" onClick={load}>
-            <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-            Tentar novamente
-          </Button>
-        </CardContent>
-      </Card>
-    );
-  }
-
+function AuditContent({ data }: { data: AuditOverview }) {
   const {
     totals,
     topPages,
@@ -125,17 +92,11 @@ export function AuditAnalysis() {
   return (
     <div className="space-y-6">
       {/* ── Header ── */}
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <Eye className="h-5 w-5 text-blue-400" />
-          <h2 className="text-sm font-semibold text-blue-300">
-            Auditoria — Logs de Acesso
-          </h2>
-        </div>
-        <Button variant="outline" size="sm" onClick={load}>
-          <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-          Atualizar
-        </Button>
+      <div className="flex items-center gap-2">
+        <Eye className="h-5 w-5 text-blue-400" />
+        <h2 className="text-sm font-semibold text-blue-300">
+          Auditoria — Logs de Acesso
+        </h2>
       </div>
 
       {/* ── Summary cards ── */}

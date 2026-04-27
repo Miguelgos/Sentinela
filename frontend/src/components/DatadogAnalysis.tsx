@@ -1,11 +1,12 @@
-import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Button } from "@/components/ui/button";
 import {
   Activity, AlertTriangle, CheckCircle, Server, Monitor,
-  XCircle, HelpCircle, Database, Globe2, Cpu, Layers,
+  XCircle, HelpCircle, Database, Globe2, Cpu, Layers, RefreshCw,
 } from "lucide-react";
+import { useAnalysisData } from "@/hooks/useAnalysisData";
+import { AnalysisShell } from "@/components/AnalysisShell";
 import {
   BarChart, Bar, XAxis, YAxis, PieChart, Pie, Cell,
 } from "recharts";
@@ -83,43 +84,43 @@ function hostAge(ts: number): { label: string; stale: boolean } {
 const PIE_COLORS = ["#3b82f6","#8b5cf6","#06b6d4","#10b981","#f59e0b","#ef4444","#6b7280"];
 
 export function DatadogAnalysis() {
-  const [data,    setData]    = useState<DatadogOverview | null>(null);
-  const [metrics, setMetrics] = useState<DatadogMetrics | null>(null);
-  const [infra,   setInfra]   = useState<DatadogInfra | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [metricsLoading, setMetricsLoading] = useState(true);
-  const [error,   setError]   = useState<string | null>(null);
+  const overviewHook = useAnalysisData(() => eventsApi.datadogOverview());
+  const metricsHook  = useAnalysisData(() => eventsApi.datadogMetrics());
+  const infraHook    = useAnalysisData(() => eventsApi.datadogInfra());
 
-  useEffect(() => {
-    eventsApi.datadogOverview()
-      .then(setData).catch((e) => setError(String(e))).finally(() => setLoading(false));
-    eventsApi.datadogMetrics()
-      .then(setMetrics).catch(() => null).finally(() => setMetricsLoading(false));
-    eventsApi.datadogInfra().then(setInfra).catch(() => null);
-  }, []);
+  const loading = overviewHook.loading || metricsHook.loading || infraHook.loading;
+  const error   = overviewHook.error || metricsHook.error || infraHook.error;
+  const reload  = () => { overviewHook.reload(); metricsHook.reload(); infraHook.reload(); };
 
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        {Array.from({ length: 4 }).map((_, i) => (
-          <Card key={i}><CardContent className="p-4"><Skeleton className="h-32 w-full" /></CardContent></Card>
-        ))}
-      </div>
-    );
-  }
+  const data    = overviewHook.data;
+  const metrics = metricsHook.data;
+  const infra   = infraHook.data;
 
-  if (error || !data) {
-    return (
-      <Card className="border-red-500/30">
-        <CardContent className="p-6 text-center text-red-400">
-          <XCircle className="h-8 w-8 mx-auto mb-2" />
-          <p className="font-semibold">Erro ao conectar com Datadog</p>
-          <p className="text-xs text-muted-foreground mt-1">{error}</p>
-        </CardContent>
-      </Card>
-    );
-  }
+  return (
+    <AnalysisShell
+      loading={loading}
+      error={error}
+      onReload={reload}
+      action={
+        <Button variant="outline" size="sm" onClick={reload}>
+          <RefreshCw className="h-3.5 w-3.5 mr-1" /> Atualizar
+        </Button>
+      }
+    >
+      {data && <DatadogContent data={data} metrics={metrics} infra={infra} />}
+    </AnalysisShell>
+  );
+}
 
+function DatadogContent({
+  data,
+  metrics,
+  infra,
+}: {
+  data: DatadogOverview;
+  metrics: DatadogMetrics | null;
+  infra: DatadogInfra | null;
+}) {
   const { monitors, logs, hosts } = data;
   const alertCount   = monitors.stateCounts["Alert"]   ?? 0;
   const warnCount    = monitors.stateCounts["Warn"]    ?? 0;
@@ -645,9 +646,7 @@ export function DatadogAnalysis() {
       )}
 
       {/* IIS Metrics */}
-      {metricsLoading ? (
-        <Card><CardContent className="p-4"><Skeleton className="h-32 w-full" /></CardContent></Card>
-      ) : metrics ? (
+      {metrics ? (
         <>
           <div className="flex items-center gap-2 pt-2">
             <Globe2 className="h-4 w-4 text-cyan-400" />

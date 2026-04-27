@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Skeleton } from "@/components/ui/skeleton";
 import {
   ShieldAlert, Zap, Code, Eye, AlertTriangle, Users, Hash,
   Activity, Key, Lock, Cpu, RefreshCw, MapPin, Database, FileDown,
 } from "lucide-react";
 import { eventsApi, type SecurityStats } from "@/lib/api";
+import { useAnalysisData } from "@/hooks/useAnalysisData";
+import { AnalysisShell } from "@/components/AnalysisShell";
 import { exportSecurityPdf } from "@/lib/exportPdf";
 import { formatTimestamp } from "@/lib/utils";
 
@@ -88,13 +89,8 @@ function MiniTable({ headers, rows }: { headers: string[]; rows: React.ReactNode
 }
 
 export function SecurityAnalysis() {
-  const [stats, setStats] = useState<SecurityStats | null>(null);
-  const [loading, setLoading] = useState(true);
+  const { data: stats, loading, error, reload } = useAnalysisData(() => eventsApi.securityStats());
   const [exporting, setExporting] = useState(false);
-
-  useEffect(() => {
-    eventsApi.securityStats().then(setStats).finally(() => setLoading(false));
-  }, []);
 
   async function handleExport() {
     if (!stats) return;
@@ -103,18 +99,30 @@ export function SecurityAnalysis() {
     finally { setExporting(false); }
   }
 
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        {Array.from({ length: 6 }).map((_, i) => (
-          <Card key={i}><CardContent className="p-4"><Skeleton className="h-32 w-full" /></CardContent></Card>
-        ))}
-      </div>
-    );
-  }
+  return (
+    <AnalysisShell
+      loading={loading}
+      error={error}
+      onReload={reload}
+      skeletonRows={6}
+      action={
+        <div className="flex gap-2">
+          <Button variant="outline" size="sm" onClick={reload}>
+            <RefreshCw className="h-3.5 w-3.5 mr-1" /> Atualizar
+          </Button>
+          <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || !stats} className="gap-2">
+            <FileDown className="h-4 w-4" />
+            {exporting ? "Gerando PDF…" : "Exportar PDF"}
+          </Button>
+        </div>
+      }
+    >
+      {stats && <SecurityContent stats={stats} />}
+    </AnalysisShell>
+  );
+}
 
-  if (!stats) return null;
-
+function SecurityContent({ stats }: { stats: SecurityStats }) {
   const totalAuthFailures = stats.authByEndpoint.reduce((s, r) => s + parseInt(r.failures), 0);
   const totalCritical = stats.criticalByContext.reduce((s, r) => s + parseInt(r.count), 0);
 
@@ -145,12 +153,6 @@ export function SecurityAnalysis() {
 
   return (
     <div className="space-y-5">
-      <div className="flex justify-end">
-        <Button variant="outline" size="sm" onClick={handleExport} disabled={exporting || !stats} className="gap-2">
-          <FileDown className="h-4 w-4" />
-          {exporting ? "Gerando PDF…" : "Exportar PDF"}
-        </Button>
-      </div>
       {/* Summary bar */}
       <div className="rounded-lg border border-red-600/30 bg-red-600/5 p-4 space-y-3">
         <div className="flex items-center gap-2">
