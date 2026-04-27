@@ -2,7 +2,7 @@ import { Router } from "express";
 import { getEvents } from "../accumulator";
 import { gcFetch } from "../lib/gcClient";
 import { ddFetch } from "../lib/ddClient";
-import { geminiNarrative } from "../lib/geminiClient";
+import { aiNarrative } from "../lib/aiClient";
 import { grafanaPromQuery, grafanaFiringAlerts } from "../lib/grafanaClient";
 
 const router = Router();
@@ -535,7 +535,7 @@ Seja direto e objetivo. Evite jargão técnico excessivo.`;
   let narrative = "";
   let narrativeError: string | null = null;
   try {
-    narrative = await geminiNarrative(prompt);
+    narrative = await aiNarrative(prompt);
   } catch (err) {
     const msg = String(err);
     console.error("[report] Claude error:", msg);

@@ -1,4 +1,4 @@
-import http from "http";
+import { makeClient } from "./httpClient";
 
 const AUDIT_DS_UID = "P73FAD9A5042C01FF";
 
@@ -11,33 +11,13 @@ function lokiGet(path: string): Promise<unknown> {
   const GRAFANA_URL   = process.env.GRAFANA_URL   || "http://grafana-prd.ituran.sp";
   const GRAFANA_TOKEN = process.env.GRAFANA_TOKEN || "";
 
-  return new Promise((resolve) => {
-    const url = new URL(path, GRAFANA_URL);
-    const options: http.RequestOptions = {
-      hostname: url.hostname,
-      port:     url.port || 80,
-      path:     url.pathname + url.search,
-      method:   "GET",
-      family:   4,
-      headers: {
-        Authorization:  `Bearer ${GRAFANA_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      timeout: 20000,
-    };
-
-    const req = http.request(options, (res) => {
-      let data = "";
-      res.on("data", (chunk) => { data += chunk; });
-      res.on("end", () => {
-        try   { resolve(JSON.parse(data)); }
-        catch { resolve(null); }
-      });
-    });
-    req.on("error",   () => resolve(null));
-    req.on("timeout", () => { req.destroy(); resolve(null); });
-    req.end();
+  const request = makeClient({
+    baseUrl:  GRAFANA_URL,
+    headers:  { Authorization: `Bearer ${GRAFANA_TOKEN}` },
+    timeoutMs: 20_000,
   });
+
+  return request(path);
 }
 
 export async function lokiQueryRange(

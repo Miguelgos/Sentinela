@@ -1,4 +1,4 @@
-import http from "http";
+import { makeClient } from "./httpClient";
 
 type PromResult = { metric: Record<string, string>; value: [number, string] };
 type PromRangeResult = { metric: Record<string, string>; values: [number, string][] };
@@ -7,33 +7,13 @@ function grafanaGet(path: string): Promise<unknown> {
   const GRAFANA_URL   = process.env.GRAFANA_URL  || "http://grafana-prd.ituran.sp";
   const GRAFANA_TOKEN = process.env.GRAFANA_TOKEN || "";
 
-  return new Promise((resolve) => {
-    const url  = new URL(path, GRAFANA_URL);
-    const options: http.RequestOptions = {
-      hostname: url.hostname,
-      port:     url.port || 80,
-      path:     url.pathname + url.search,
-      method:   "GET",
-      family:   4,
-      headers: {
-        Authorization:  `Bearer ${GRAFANA_TOKEN}`,
-        "Content-Type": "application/json",
-      },
-      timeout: 15000,
-    };
-
-    const req = http.request(options, (res) => {
-      let data = "";
-      res.on("data", (chunk) => { data += chunk; });
-      res.on("end", () => {
-        try   { resolve(JSON.parse(data)); }
-        catch { resolve(null); }
-      });
-    });
-    req.on("error",   () => resolve(null));
-    req.on("timeout", () => { req.destroy(); resolve(null); });
-    req.end();
+  const request = makeClient({
+    baseUrl:  GRAFANA_URL,
+    headers:  { Authorization: `Bearer ${GRAFANA_TOKEN}` },
+    timeoutMs: 15_000,
   });
+
+  return request(path);
 }
 
 export async function grafanaPromQuery(promql: string): Promise<PromResult[]> {

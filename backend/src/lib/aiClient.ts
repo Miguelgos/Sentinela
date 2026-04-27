@@ -1,6 +1,6 @@
 import https from "https";
 
-export async function geminiNarrative(prompt: string): Promise<string> {
+export async function aiNarrative(prompt: string): Promise<string> {
   const endpoint   = process.env.AZURE_OPENAI_ENDPOINT   || "";
   const apiKey     = process.env.AZURE_OPENAI_KEY        || "";
   const deployment = process.env.AZURE_OPENAI_DEPLOYMENT || "sentinela";
@@ -19,8 +19,8 @@ export async function geminiNarrative(prompt: string): Promise<string> {
       method:             "POST",
       rejectUnauthorized: false,
       headers: {
-        "api-key":       apiKey,
-        "Content-Type":  "application/json",
+        "api-key":        apiKey,
+        "Content-Type":   "application/json",
         "Content-Length": Buffer.byteLength(body),
       },
       timeout: 30000,
