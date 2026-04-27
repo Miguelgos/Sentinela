@@ -1,6 +1,6 @@
 import http from "http";
 
-const AUDIT_DS_UID = "P73FAD9A5042C01FF";
+const AUDIT_DS_UID = process.env.LOKI_AUDIT_UID || "P73FAD9A5042C01FF";
 
 export interface LokiStream {
   stream: Record<string, string>;
