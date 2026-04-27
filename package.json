@@ -3,9 +3,9 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev":   "vinxi dev",
-    "build": "vinxi build",
-    "start": "vinxi start"
+    "dev":   "vite dev",
+    "build": "vite build",
+    "start": "node dist/server/server.js"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.2",
@@ -33,7 +33,7 @@
     "react-dom":                    "^18.3.1",
     "recharts":                     "^2.15.4",
     "tailwind-merge":               "^2.3.0",
-    "vinxi":                        "^0.5.11"
+    "vite":                         "^7.3.2"
   },
   "devDependencies": {
     "@types/mssql":        "^12.3.0",
