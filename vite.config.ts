@@ -20,7 +20,7 @@ export default defineConfig({
         "style-src 'self' 'unsafe-inline'",
         "img-src 'self' data: blob:",
         "font-src 'self'",
-        "connect-src 'self' https://*.supabase.co wss://*.supabase.co http://localhost:3001",
+        "connect-src 'self' https://*.supabase.co wss://*.supabase.co ws://localhost:5173 ws://172.23.147.145:5173 http://localhost:3001",
         "frame-ancestors 'none'",
       ].join("; "),
     },
