@@ -63,4 +63,11 @@ test.describe("Sentinela — smoke", () => {
     });
   });
 
+  test("integração Azure OpenAI Foundry responde", async ({ request }) => {
+    const res = await request.get(`${BASEPATH}/api/ai-check`, { timeout: 30_000 });
+    const body = await res.json();
+    expect(res.status(), `ai-check falhou: ${JSON.stringify(body)}`).toBe(200);
+    expect(body.ok).toBe(true);
+    expect(body.sample.length).toBeGreaterThan(0);
+  });
 });
