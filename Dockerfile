@@ -1,22 +1,23 @@
 # syntax=docker/dockerfile:1.7
 
-FROM node:24-alpine AS deps
+FROM node:24-alpine AS base
+RUN corepack enable
 WORKDIR /app
-COPY package*.json ./
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci --no-audit --no-fund
 
-FROM node:24-alpine AS build
-WORKDIR /app
+FROM base AS deps
+COPY package.json pnpm-lock.yaml ./
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile
+
+FROM base AS build
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
-RUN npm run build
+RUN pnpm run build
 
-FROM node:24-alpine AS prod-deps
-WORKDIR /app
-COPY package*.json ./
-RUN --mount=type=cache,target=/root/.npm \
-    npm ci --omit=dev --no-audit --no-fund
+FROM base AS prod-deps
+COPY package.json pnpm-lock.yaml ./
+RUN --mount=type=cache,id=pnpm,target=/root/.local/share/pnpm/store \
+    pnpm install --frozen-lockfile --prod
 
 FROM node:24-alpine AS runtime
 
