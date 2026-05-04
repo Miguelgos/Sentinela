@@ -6,6 +6,7 @@ import {
   Scripts,
   ScrollRestoration,
 } from "@tanstack/react-router";
+import { createServerFn } from "@tanstack/react-start";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "../../frontend/src/index.css";
 
@@ -13,7 +14,20 @@ interface RouterContext {
   queryClient: QueryClient;
 }
 
+export interface RuntimeEnv {
+  VITE_SUPABASE_URL: string;
+  VITE_SUPABASE_ANON_KEY: string;
+}
+
+const getRuntimeEnv = createServerFn({ method: "GET" }).handler(
+  (): RuntimeEnv => ({
+    VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL ?? "",
+    VITE_SUPABASE_ANON_KEY: process.env.VITE_SUPABASE_ANON_KEY ?? "",
+  }),
+);
+
 export const Route = createRootRouteWithContext<RouterContext>()({
+  loader: () => getRuntimeEnv(),
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -29,20 +43,29 @@ export const Route = createRootRouteWithContext<RouterContext>()({
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const env = Route.useLoaderData();
   return (
     <QueryClientProvider client={queryClient}>
-      <RootDocument>
+      <RootDocument env={env}>
         <Outlet />
       </RootDocument>
     </QueryClientProvider>
   );
 }
 
-function RootDocument({ children }: Readonly<{ children: ReactNode }>) {
+function RootDocument({
+  children,
+  env,
+}: Readonly<{ children: ReactNode; env: RuntimeEnv }>) {
   return (
     <html lang="pt-BR" className="dark">
       <head>
         <HeadContent />
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `window.__ENV__ = ${JSON.stringify(env)};`,
+          }}
+        />
       </head>
       <body>
         <ScrollRestoration />
