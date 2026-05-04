@@ -1,8 +1,27 @@
 "use server";
 import { createServerFn } from "@tanstack/react-start";
 import { fetchSeq, prop, truncHour } from "../../../backend/src/seq";
-import { getEvents, isReady, storeSize, storeCoverage } from "../../../backend/src/accumulator";
+import {
+  getEvents,
+  isReady,
+  storeSize,
+  storeCoverage,
+  getSyncProgress,
+} from "../../../backend/src/accumulator";
 import type { EventFilters } from "../../../frontend/src/lib/api";
+
+// Cache simples em memória pra reduzir requests ao Seq (limite de licença).
+// Cada handler que bate direto no Seq deve passar por aqui.
+const seqCache = new Map<string, { ts: number; data: unknown }>();
+const SEQ_CACHE_TTL_MS = 5 * 60_000;
+
+async function memoizeSeq<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const hit = seqCache.get(key);
+  if (hit && Date.now() - hit.ts < SEQ_CACHE_TTL_MS) return hit.data as T;
+  const data = await fn();
+  seqCache.set(key, { ts: Date.now(), data });
+  return data;
+}
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
@@ -63,7 +82,13 @@ function clientFrom(msg: string): string | null {
 
 export const getEventsStatus = createServerFn({ method: "GET" }).handler(async () => {
   const { oldest, newest } = storeCoverage();
-  return { ready: isReady(), events: storeSize(), oldest, newest };
+  return {
+    ready: isReady(),
+    events: storeSize(),
+    oldest,
+    newest,
+    progress: getSyncProgress(),
+  };
 });
 
 // ── listEvents ────────────────────────────────────────────────────────────────
@@ -147,7 +172,8 @@ export const getTimeline = createServerFn({ method: "GET" })
 
 // ── getAuthErrorStats ─────────────────────────────────────────────────────────
 
-export const getAuthErrorStats = createServerFn({ method: "GET" }).handler(async () => {
+export const getAuthErrorStats = createServerFn({ method: "GET" }).handler(async () =>
+  memoizeSeq("getAuthErrorStats", async () => {
   const auth = await fetchSeq({
     filter:   "Contains(@Message, 'Erro autenticação')",
     maxTotal: 10000,
@@ -194,11 +220,12 @@ export const getAuthErrorStats = createServerFn({ method: "GET" }).handler(async
   }));
 
   return { total: auth.length, timeline, topUsers, topClients, recentEvents };
-});
+}));
 
 // ── getKongAuthStats ──────────────────────────────────────────────────────────
 
-export const getKongAuthStats = createServerFn({ method: "GET" }).handler(async () => {
+export const getKongAuthStats = createServerFn({ method: "GET" }).handler(async () =>
+  memoizeSeq("getKongAuthStats", async () => {
   const kongAll = await fetchSeq({
     filter:   "@Message = 'Kong Auth Request'",
     maxTotal: 10000,
@@ -302,4 +329,4 @@ export const getKongAuthStats = createServerFn({ method: "GET" }).handler(async 
     timeline, topUsers, topIPs, credentialStuffing: stuffing,
     anomalousUsernames, serverErrors, recentFailures,
   };
-});
+}));

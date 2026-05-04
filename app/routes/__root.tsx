@@ -8,6 +8,7 @@ import {
 } from "@tanstack/react-router";
 import { createServerFn } from "@tanstack/react-start";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { SyncBanner } from "../../frontend/src/components/SyncBanner";
 import "../../frontend/src/index.css";
 
 interface RouterContext {
@@ -69,6 +70,7 @@ function RootDocument({
       </head>
       <body>
         <ScrollRestoration />
+        <SyncBanner />
         {children}
         <Scripts />
       </body>

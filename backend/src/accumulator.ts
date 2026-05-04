@@ -3,10 +3,8 @@ import { SeqApiEvent, parseSeqApiEvent } from "./types";
 
 export type ParsedEvent = ReturnType<typeof parseSeqApiEvent>;
 
-// Só traz erros e alertas do SEQ — reduz volume drasticamente
 const LEVEL_FILTER = "@Level in ['Warning', 'Error', 'Fatal']";
 
-// ── Noise sources descartadas em níveis não-críticos ─────────────────────────
 const NOISE_SOURCES = new Set([
   "IdentityServer4.AccessTokenValidation.IdentityServerAuthenticationHandler",
   "Microsoft.AspNetCore.HttpOverrides.ForwardedHeadersMiddleware",
@@ -23,21 +21,46 @@ export function shouldStore(e: ParsedEvent): boolean {
   return true;
 }
 
-const RETENTION_MS = 7 * 86_400_000;
+const RETENTION_DAYS = 7;
+const RETENTION_MS = RETENTION_DAYS * 86_400_000;
+
+// Cap: 50KB médios/evento × 15k = ~750MB no pior caso, dentro do limit 768Mi do pod
+const MAX_EVENTS = 15_000;
 
 const _store = new Map<string, ParsedEvent>();
 let _latestSeqId: string | undefined;
-let _ready = false;
 let _oldestTs: string | undefined;
 let _newestTs: string | undefined;
+
+export type SyncPhase = "idle" | "syncing" | "done" | "error";
+const _syncProgress: {
+  phase: SyncPhase;
+  daysDone: number;
+  daysTotal: number;
+  loaded: number;
+  startedAt: string | null;
+  finishedAt: string | null;
+  error: string | null;
+} = {
+  phase: "idle",
+  daysDone: 0,
+  daysTotal: RETENTION_DAYS,
+  loaded: 0,
+  startedAt: null,
+  finishedAt: null,
+  error: null,
+};
 
 export function getEvents(): ParsedEvent[] {
   return [..._store.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }
-export function isReady(): boolean { return _ready; }
+export function isReady(): boolean { return _syncProgress.phase === "done"; }
 export function storeSize(): number { return _store.size; }
 export function storeCoverage() {
   return { oldest: _oldestTs, newest: _newestTs };
+}
+export function getSyncProgress() {
+  return { ..._syncProgress };
 }
 
 function addToStore(events: ParsedEvent[]): void {
@@ -49,7 +72,7 @@ function addToStore(events: ParsedEvent[]): void {
   }
 }
 
-// ── Remove do Map eventos mais antigos que 7 dias e recalcula _oldestTs ───────
+// Drop events older than RETENTION_MS and recompute _oldestTs
 function applyMapRetention(): void {
   const cutoff = new Date(Date.now() - RETENTION_MS).toISOString();
   let removed = 0;
@@ -60,51 +83,58 @@ function applyMapRetention(): void {
     }
   }
   if (removed > 0) {
-    // Recalcula _oldestTs após o trim
     _oldestTs = undefined;
     for (const e of _store.values()) {
       if (!_oldestTs || e.timestamp < _oldestTs) _oldestTs = e.timestamp;
     }
-    console.log(`[accumulator] retenção: -${removed} eventos > 7d (store: ${_store.size})`);
+    console.log(`[accumulator] retenção: -${removed} eventos > ${RETENTION_DAYS}d (store: ${_store.size})`);
   }
 }
 
-// ── Fetch paginado do Seq com fromDateUtc opcional ────────────────────────────
-async function fetchFromSeq(sinceDate?: Date, maxEvents = 500_000): Promise<{ events: ParsedEvent[]; firstId?: string }> {
+// Hard cap: drop oldest until size <= MAX_EVENTS
+function applyMaxEventsCap(): void {
+  if (_store.size <= MAX_EVENTS) return;
+  const entries = [..._store.entries()].sort((a, b) =>
+    a[1].timestamp.localeCompare(b[1].timestamp),
+  );
+  const toRemove = entries.length - MAX_EVENTS;
+  for (let i = 0; i < toRemove; i++) _store.delete(entries[i][0]);
+  _oldestTs = entries[toRemove]?.[1].timestamp;
+  console.log(`[accumulator] cap: -${toRemove} eventos (store: ${_store.size}, max: ${MAX_EVENTS})`);
+}
+
+// Fetch a window from Seq with from+to, paginated by afterId
+async function fetchSeqRange(from: Date, to: Date, maxEvents = 50_000): Promise<ParsedEvent[]> {
   const PAGE = 1000;
   const SEQ_SIGNAL = process.env.SEQ_SIGNAL || "";
   const results: ParsedEvent[] = [];
   let afterId: string | undefined;
-  let firstId: string | undefined;
 
   while (results.length < maxEvents) {
     let qs = `?count=${PAGE}&render=true`;
-    if (SEQ_SIGNAL)   qs += `&signal=${encodeURIComponent(SEQ_SIGNAL)}`;
+    if (SEQ_SIGNAL) qs += `&signal=${encodeURIComponent(SEQ_SIGNAL)}`;
     qs += `&filter=${encodeURIComponent(LEVEL_FILTER)}`;
-    if (sinceDate)    qs += `&fromDateUtc=${encodeURIComponent(sinceDate.toISOString())}`;
-    if (afterId)      qs += `&afterId=${encodeURIComponent(afterId)}`;
+    qs += `&fromDateUtc=${encodeURIComponent(from.toISOString())}`;
+    qs += `&toDateUtc=${encodeURIComponent(to.toISOString())}`;
+    if (afterId) qs += `&afterId=${encodeURIComponent(afterId)}`;
 
     const raw: SeqApiEvent[] = await seqHttpGet(`/api/events/${qs}`);
     if (raw.length === 0) break;
 
-    if (!firstId && raw[0]?.Id) firstId = raw[0].Id;
-
-    let done = false;
     for (const e of raw) {
-      if (sinceDate && new Date(e.Timestamp) < sinceDate) { done = true; break; }
       const p = parseSeqApiEvent(e);
       if (shouldStore(p)) results.push(p);
     }
 
-    if (done || raw.length < PAGE) break;
+    if (raw.length < PAGE) break;
     afterId = raw[raw.length - 1]?.Id;
     if (!afterId) break;
   }
 
-  return { events: results, firstId };
+  return results;
 }
 
-// ── Poll a cada 60s: busca só o que é mais novo que _latestSeqId ──────────────
+// Poll a cada 60s: busca só o que é mais novo que _latestSeqId
 async function refresh(): Promise<void> {
   const PAGE = 500;
   const SEQ_SIGNAL = process.env.SEQ_SIGNAL || "";
@@ -130,35 +160,58 @@ async function refresh(): Promise<void> {
   if (raw[0]?.Id) _latestSeqId = raw[0].Id;
 
   applyMapRetention();
+  applyMaxEventsCap();
 }
 
-// ── Inicialização ─────────────────────────────────────────────────────────────
-export async function initAccumulator(): Promise<void> {
-  try {
-    // Full sync dos últimos 7 dias do Seq
-    const sinceDate = new Date(Date.now() - RETENTION_MS);
-    console.log(`[accumulator] full sync do Seq desde ${sinceDate.toISOString().slice(0, 10)}`);
+// Sync 7 dias em chunks de 1 dia (do mais recente pro mais antigo).
+// Atualiza _syncProgress a cada chunk pra dar feedback ao frontend.
+async function syncFullHistory(): Promise<void> {
+  _syncProgress.phase = "syncing";
+  _syncProgress.startedAt = new Date().toISOString();
+  _syncProgress.daysDone = 0;
+  _syncProgress.loaded = 0;
+  _syncProgress.error = null;
 
-    const { events: newEvents, firstId } = await fetchFromSeq(sinceDate, 50_000);
+  console.log(`[accumulator] sync inicial: ${RETENTION_DAYS} dias em chunks de 1 dia`);
 
-    if (newEvents.length > 0) {
-      addToStore(newEvents);
-      console.log(`[accumulator] Seq sync: ${newEvents.length} eventos carregados`);
-    } else {
-      console.log("[accumulator] Seq sync concluído — nenhum evento no período");
+  for (let d = 1; d <= RETENTION_DAYS; d++) {
+    const to = new Date(Date.now() - (d - 1) * 86_400_000);
+    const from = new Date(Date.now() - d * 86_400_000);
+    try {
+      const events = await fetchSeqRange(from, to);
+      if (events.length > 0) {
+        addToStore(events);
+        _syncProgress.loaded += events.length;
+      }
+      // Lembra o ID mais recente já visto pra base do refresh()
+      if (d === 1 && events.length > 0 && !_latestSeqId) {
+        // events vêm em ordem desc (mais recente primeiro); pega o mais novo
+        const newest = events.reduce((a, b) => (a.timestamp > b.timestamp ? a : b));
+        _latestSeqId = newest.event_id ?? undefined;
+      }
+      console.log(`[accumulator] dia ${d}/${RETENTION_DAYS}: +${events.length} eventos (store: ${_store.size})`);
+    } catch (err) {
+      console.error(`[accumulator] erro no dia ${d}:`, err);
     }
-
-    if (firstId) _latestSeqId = firstId;
-
-  } catch (err) {
-    console.error("[accumulator] erro na inicialização:", err);
-  } finally {
-    _ready = true;
-    console.log(`[accumulator] pronto — store: ${_store.size} | desde: ${_oldestTs?.slice(0, 10) ?? "?"}`);
+    _syncProgress.daysDone = d;
+    applyMaxEventsCap();
   }
 
-  setInterval(async () => {
-    try { await refresh(); }
-    catch (err) { console.error("[accumulator] erro no refresh:", err); }
+  _syncProgress.phase = "done";
+  _syncProgress.finishedAt = new Date().toISOString();
+  console.log(`[accumulator] sync completo: ${_syncProgress.loaded} eventos | store: ${_store.size}`);
+}
+
+// Boot não-bloqueante: HTTP server e refresh sobem imediatamente,
+// sync de 7d roda em background. async pra compat com chamadores existentes.
+export async function initAccumulator(): Promise<void> {
+  setInterval(() => {
+    refresh().catch((err) => console.error("[accumulator] erro no refresh:", err));
   }, 60_000);
+
+  syncFullHistory().catch((err) => {
+    _syncProgress.phase = "error";
+    _syncProgress.error = String(err);
+    console.error("[accumulator] erro no sync inicial:", err);
+  });
 }
