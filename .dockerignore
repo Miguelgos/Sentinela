@@ -3,6 +3,7 @@
 .gitignore
 .dockerignore
 node_modules
+dist
 .output
 .tanstack
 .cache

@@ -26,7 +26,7 @@ RUN apk add --no-cache tini && \
 
 WORKDIR /app
 
-COPY --from=build      --chown=sentinela:sentinela /app/.output      ./.output
+COPY --from=build      --chown=sentinela:sentinela /app/dist         ./dist
 COPY --from=prod-deps  --chown=sentinela:sentinela /app/node_modules ./node_modules
 COPY --from=build      --chown=sentinela:sentinela /app/package.json ./package.json
 
@@ -38,4 +38,4 @@ USER sentinela
 EXPOSE 3000
 
 ENTRYPOINT ["/sbin/tini", "--"]
-CMD ["node", ".output/server/index.mjs"]
+CMD ["node", "dist/server/server.js"]
