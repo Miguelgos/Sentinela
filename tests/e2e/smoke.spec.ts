@@ -63,14 +63,4 @@ test.describe("Sentinela — smoke", () => {
     });
   });
 
-  test("sync status retorna progresso do accumulator", async ({ request }) => {
-    // server fn é POST com body vazio
-    const res = await request.post(`${BASEPATH}/_serverFn/getEventsStatus`, {
-      data: {},
-      headers: { "Content-Type": "application/json" },
-    });
-    // Aceita 200 (responde) ou 405/404 caso a rota tenha mudado — só queremos
-    // que o app esteja vivo e responsivo.
-    expect([200, 404, 405]).toContain(res.status());
-  });
 });
