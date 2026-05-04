@@ -24,8 +24,10 @@ export function shouldStore(e: ParsedEvent): boolean {
 const RETENTION_DAYS = 7;
 const RETENTION_MS = RETENTION_DAYS * 86_400_000;
 
-// Cap: 50KB médios/evento × 15k = ~750MB no pior caso, dentro do limit 768Mi do pod
-const MAX_EVENTS = 15_000;
+// Cap: medido em prd, ~19KB residentes/evento × 30k ≈ 570MB, dentro do limit 768Mi do pod.
+// Cobre ~3 dias do volume atual (~10k eventos/dia). Para 7 dias completos seria
+// preciso subir resources.limits.memory no manifest k8s para ~1.5-2Gi.
+const MAX_EVENTS = 30_000;
 
 const _store = new Map<string, ParsedEvent>();
 let _latestSeqId: string | undefined;
