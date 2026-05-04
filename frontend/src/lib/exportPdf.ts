@@ -39,94 +39,65 @@ const LIGHT  = "#f3f4f6";
 
 type LastTable = jsPDF & { lastAutoTable: { finalY: number } };
 
-// ── Shared helpers ─────────────────────────────────────────────────────────
-function ts(iso: string | null | undefined) {
-  if (!iso) return "—";
-  return format(new Date(iso), "dd/MM/yyyy HH:mm:ss", { locale: ptBR });
-}
+// ── Format helpers ─────────────────────────────────────────────────────────
+const nfmt = (x: string | number) => (typeof x === "string" ? parseInt(x) : x).toLocaleString("pt-BR");
+const ts = (iso: string | null | undefined) =>
+  iso ? format(new Date(iso), "dd/MM/yyyy HH:mm:ss", { locale: ptBR }) : "—";
+const hfmt = (iso: string) => format(new Date(iso), "dd/MM HH:mm", { locale: ptBR });
+const stamp = () => format(new Date(), "yyyy-MM-dd_HH-mm");
 
-function now() {
-  return format(new Date(), "dd/MM/yyyy HH:mm", { locale: ptBR });
-}
-
-function stamp() {
-  return format(new Date(), "yyyy-MM-dd_HH-mm");
-}
-
+// ── Logo ───────────────────────────────────────────────────────────────────
 function drawLogo(doc: jsPDF, cx: number, cy: number) {
   const hw = 6.5;
 
-  // Shield filled polygon
   doc.setFillColor(BRAND);
   doc.setDrawColor(BRAND);
   doc.setLineWidth(0);
   doc.lines(
     [[hw, 1.4], [0, 7.7], [-2.5, 5.5], [-4, 3.0], [-4, -3.0], [-2.5, -5.5], [0, -7.7]],
-    cx, cy - 8.6,
-    [1, 1], "F", true,
+    cx, cy - 8.6, [1, 1], "F", true,
   );
 
-  // Shield inner border highlight
   doc.setDrawColor("#93c5fd");
   doc.setLineWidth(0.25);
   doc.lines(
     [[5.2, 1.1], [0, 6.4], [-2.1, 4.7], [-3.1, 2.5], [-3.1, -2.5], [-2.1, -4.7], [0, -6.4]],
-    cx, cy - 7.2,
-    [1, 1], "S", true,
+    cx, cy - 7.2, [1, 1], "S", true,
   );
 
-  // Top eyelash arc
+  const dl = doc as unknown as { lines: (lines: number[][], x: number, y: number, scale: [number, number], style: string) => void };
   doc.setLineWidth(0.28);
   doc.setDrawColor("#93c5fd");
-  (doc as unknown as { lines: (lines: number[][], x: number, y: number, scale: [number,number], style: string) => void })
-    .lines([[2.1, -3.2, 6.3, -3.2, 8.4, 0]], cx - 4.2, cy - 0.6, [1, 1], "S");
+  dl.lines([[2.1, -3.2, 6.3, -3.2, 8.4, 0]], cx - 4.2, cy - 0.6, [1, 1], "S");
+  dl.lines([[2.1,  3.2, 6.3,  3.2, 8.4, 0]], cx - 4.2, cy + 0.6, [1, 1], "S");
 
-  // Bottom eyelash arc
-  (doc as unknown as { lines: (lines: number[][], x: number, y: number, scale: [number,number], style: string) => void })
-    .lines([[2.1, 3.2, 6.3, 3.2, 8.4, 0]], cx - 4.2, cy + 0.6, [1, 1], "S");
-
-  // Outer eye ellipse
   doc.setDrawColor("#bfdbfe");
   doc.setLineWidth(0.4);
   doc.ellipse(cx, cy, 4.2, 2.5, "S");
-
-  // Iris
   doc.setFillColor("#1e3a8a");
   doc.circle(cx, cy, 1.7, "F");
-
-  // Pupil
   doc.setFillColor("#0f172a");
   doc.circle(cx, cy, 0.95, "F");
-
-  // Glint
   doc.setFillColor("#93c5fd");
   doc.circle(cx + 0.65, cy - 0.65, 0.42, "F");
 
-  // Scan line (dashed)
-  const d = doc as unknown as { setLineDashPattern: (a: number[], p: number) => void };
+  const dash = doc as unknown as { setLineDashPattern: (a: number[], p: number) => void };
   doc.setDrawColor("#60a5fa");
   doc.setLineWidth(0.2);
-  d.setLineDashPattern([0.7, 1.4], 0);
+  dash.setLineDashPattern([0.7, 1.4], 0);
   doc.line(cx - hw, cy, cx + hw, cy);
-  d.setLineDashPattern([], 0);
-
-  // Reset stroke
+  dash.setLineDashPattern([], 0);
   doc.setLineWidth(0.2);
   doc.setDrawColor("#000000");
 }
 
+// ── Layout primitives ──────────────────────────────────────────────────────
 function header(doc: jsPDF, title: string, subtitle = "Ituran · integra-prd") {
-  const n = now();
+  const n = format(new Date(), "dd/MM/yyyy HH:mm", { locale: ptBR });
   doc.setFillColor(BRAND);
   doc.rect(0, 0, 210, 28, "F");
-
-  // Logo — rasterised SVG on the right side of the header band
-  // SVG is 800×320 (2.5:1); at width=55mm → height=22mm, y=3mm centres it in 28mm band
-  if (_logoDataUrl) {
-    doc.addImage(_logoDataUrl, "PNG", 148, 3, 55, 22);
-  } else {
-    drawLogo(doc, 196, 14);
-  }
+  if (_logoDataUrl) doc.addImage(_logoDataUrl, "PNG", 148, 3, 55, 22);
+  else drawLogo(doc, 196, 14);
 
   doc.setFontSize(16);
   doc.setTextColor("#ffffff");
@@ -165,12 +136,7 @@ function section(doc: jsPDF, y: number, title: string, color = BRAND): number {
 }
 
 function checkPage(doc: jsPDF, y: number, needed = 30): number {
-  if (y + needed > 278) { doc.addPage(); return 15; }
-  return y;
-}
-
-function createDoc(orientation: "portrait" | "landscape" = "portrait") {
-  return new jsPDF({ orientation, unit: "mm", format: "a4" });
+  return y + needed > 278 ? (doc.addPage(), 15) : y;
 }
 
 type TableOpts = {
@@ -194,17 +160,30 @@ function table(doc: jsPDF, y: number, head: string[][], body: (string | number)[
   return (doc as LastTable).lastAutoTable.finalY + 6;
 }
 
+// Composto de checkPage + section + table — wrapper do trio repetido
+// dezenas de vezes. needPage default cobre "header da seção + 1ª página da
+// tabela"; aumente quando o conteúdo exigir folga maior.
+function tableSection(
+  doc: jsPDF, y: number, title: string,
+  head: string[][], body: (string | number)[][],
+  opts?: TableOpts & { needPage?: number },
+): number {
+  y = checkPage(doc, y, opts?.needPage ?? 35);
+  y = section(doc, y, title, opts?.color);
+  return table(doc, y, head, body, opts);
+}
+
 function summaryBox(doc: jsPDF, y: number, cols: [string, string, string?][]) {
   const colW = 182 / 3;
+  const rows = Math.ceil(cols.length / 3);
+  const h = rows * 11 + 5;
   doc.setFillColor(LIGHT);
-  doc.rect(14, y, 182, Math.ceil(cols.length / 3) * 11 + 5, "F");
+  doc.rect(14, y, 182, h, "F");
   doc.setDrawColor("#d1d5db");
-  doc.rect(14, y, 182, Math.ceil(cols.length / 3) * 11 + 5, "S");
+  doc.rect(14, y, 182, h, "S");
   cols.forEach(([label, val, color], i) => {
-    const col = i % 3;
-    const row = Math.floor(i / 3);
-    const x = 14 + col * colW + 4;
-    const ry = y + row * 11 + 4;
+    const x = 14 + (i % 3) * colW + 4;
+    const ry = y + Math.floor(i / 3) * 11 + 4;
     doc.setFontSize(7);
     doc.setTextColor(GRAY);
     doc.setFont("helvetica", "normal");
@@ -215,208 +194,187 @@ function summaryBox(doc: jsPDF, y: number, cols: [string, string, string?][]) {
     doc.text(val, x, ry + 5.5);
   });
   doc.setTextColor("#000000");
-  return y + Math.ceil(cols.length / 3) * 11 + 10;
+  return y + h + 5;
+}
+
+// Boilerplate de criar doc + header + footers + save em uma chamada.
+function withDocument(
+  title: string, label: string, filenamePrefix: string,
+  build: (doc: jsPDF, startY: number) => void,
+  subtitle?: string,
+) {
+  const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+  const { startY, now: n } = header(doc, title, subtitle);
+  build(doc, startY);
+  footers(doc, label, n);
+  doc.save(`${filenamePrefix}-${stamp()}.pdf`);
 }
 
 // ── Kong Auth ──────────────────────────────────────────────────────────────
 export function exportKongAuthPdf(stats: KongAuthStats) {
-  const doc = createDoc();
-  const { startY, now: n } = header(doc, "Kong Auth Request — Análise de Falhas");
-  const { summary, timeline, topUsers, topIPs, credentialStuffing, serverErrors, recentFailures } = stats;
+  withDocument("Kong Auth Request — Análise de Falhas", "Kong Auth Analysis", "kong-auth", (doc, startY) => {
+    const { summary, timeline, topUsers, topIPs, credentialStuffing, serverErrors, recentFailures } = stats;
 
-  let y = summaryBox(doc, startY, [
-    ["Total Requests",   summary.total.toLocaleString("pt-BR")],
-    ["Falhas (!= 200)",  summary.failures.toLocaleString("pt-BR"), RED],
-    ["Taxa de Falha",    `${summary.failurePct}%`, ORANGE],
-    ["401 Unauthorized", summary.failures401.toLocaleString("pt-BR"), ORANGE],
-    ["500 Server Error", summary.failures500.toLocaleString("pt-BR"), RED],
-    ["Sucesso (200)",    summary.successes.toLocaleString("pt-BR"), GREEN],
-  ]);
+    let y = summaryBox(doc, startY, [
+      ["Total Requests",   nfmt(summary.total)],
+      ["Falhas (!= 200)",  nfmt(summary.failures), RED],
+      ["Taxa de Falha",    `${summary.failurePct}%`, ORANGE],
+      ["401 Unauthorized", nfmt(summary.failures401), ORANGE],
+      ["500 Server Error", nfmt(summary.failures500), RED],
+      ["Sucesso (200)",    nfmt(summary.successes), GREEN],
+    ]);
 
-  if (credentialStuffing.length > 0) {
-    y = checkPage(doc, y, 40);
-    y = section(doc, y, `[!] Credential Stuffing / Enumeracao de Usernames — ${credentialStuffing.length} IP(s)`, RED);
-    y = table(doc, y, [["IP", "Usuários tentados", "Falhas", "Janela (min)", "Início", "Fim"]],
-      credentialStuffing.map((r) => [r.client_ip, r.usuarios_tentados, r.total_falhas, r.janela_min, ts(r.first_seen), ts(r.last_seen)]),
-      { color: RED });
-  }
+    if (credentialStuffing.length > 0) {
+      y = tableSection(doc, y,
+        `[!] Credential Stuffing / Enumeracao de Usernames — ${credentialStuffing.length} IP(s)`,
+        [["IP", "Usuários tentados", "Falhas", "Janela (min)", "Início", "Fim"]],
+        credentialStuffing.map(r => [r.client_ip, r.usuarios_tentados, r.total_falhas, r.janela_min, ts(r.first_seen), ts(r.last_seen)]),
+        { color: RED, needPage: 40 });
+    }
 
-  if (timeline.length > 0) {
-    y = checkPage(doc, y, 35);
-    y = section(doc, y, "Timeline — Kong Auth por hora");
-    y = table(doc, y, [["Hora", "Falhas", "Sucessos", "Total", "Taxa Falha"]],
-      timeline.map((t) => {
-        const tot = t.falhas + t.sucessos;
-        return [format(new Date(t.hora), "dd/MM HH:mm", { locale: ptBR }), t.falhas, t.sucessos, tot,
-          tot > 0 ? `${((t.falhas / tot) * 100).toFixed(1)}%` : "—"];
-      }));
-  }
+    if (timeline.length > 0) {
+      y = tableSection(doc, y, "Timeline — Kong Auth por hora",
+        [["Hora", "Falhas", "Sucessos", "Total", "Taxa Falha"]],
+        timeline.map(t => {
+          const tot = t.falhas + t.sucessos;
+          return [hfmt(t.hora), t.falhas, t.sucessos, tot, tot > 0 ? `${((t.falhas / tot) * 100).toFixed(1)}%` : "—"];
+        }));
+    }
 
-  if (topUsers.length > 0) {
-    y = checkPage(doc, y, 40);
-    y = section(doc, y, `Usuários com Mais Falhas (top ${topUsers.length})`);
-    y = table(doc, y, [["Username", "Falhas", "Primeiro", "Último"]],
-      topUsers.map((u) => [u.username, u.falhas, ts(u.first_seen), ts(u.last_seen)]));
-  }
+    if (topUsers.length > 0) {
+      y = tableSection(doc, y, `Usuários com Mais Falhas (top ${topUsers.length})`,
+        [["Username", "Falhas", "Primeiro", "Último"]],
+        topUsers.map(u => [u.username, u.falhas, ts(u.first_seen), ts(u.last_seen)]),
+        { needPage: 40 });
+    }
 
-  if (topIPs.length > 0) {
-    y = checkPage(doc, y, 40);
-    y = section(doc, y, `IPs com Mais Falhas (top ${topIPs.length})`);
-    y = table(doc, y, [["IP", "Falhas", "Usuários únicos", "Primeiro", "Último"]],
-      topIPs.map((ip) => [ip.client_ip, ip.falhas, ip.usuarios_unicos, ts(ip.first_seen), ts(ip.last_seen)]));
-  }
+    if (topIPs.length > 0) {
+      y = tableSection(doc, y, `IPs com Mais Falhas (top ${topIPs.length})`,
+        [["IP", "Falhas", "Usuários únicos", "Primeiro", "Último"]],
+        topIPs.map(ip => [ip.client_ip, ip.falhas, ip.usuarios_unicos, ts(ip.first_seen), ts(ip.last_seen)]),
+        { needPage: 40 });
+    }
 
-  if (serverErrors.length > 0) {
-    y = checkPage(doc, y, 35);
-    y = section(doc, y, `Erros 500 — Falha Interna no Kong (${serverErrors.length})`, RED);
-    y = table(doc, y, [["Horário", "Username", "IP", "Path"]],
-      serverErrors.map((r) => [ts(r.timestamp), r.username || "—", r.client_ip || "—", r.path || "—"]),
-      { color: RED });
-  }
+    if (serverErrors.length > 0) {
+      y = tableSection(doc, y, `Erros 500 — Falha Interna no Kong (${serverErrors.length})`,
+        [["Horário", "Username", "IP", "Path"]],
+        serverErrors.map(r => [ts(r.timestamp), r.username || "—", r.client_ip || "—", r.path || "—"]),
+        { color: RED });
+    }
 
-  if (recentFailures.length > 0) {
-    y = checkPage(doc, y, 40);
-    y = section(doc, y, `Falhas Recentes (últimas ${recentFailures.length})`);
-    table(doc, y, [["Horário", "Status", "Username", "IP", "Path", "Module"]],
-      recentFailures.map((r) => [ts(r.timestamp), r.status_code, r.username || "—", r.client_ip || "—", r.path || "—", r.module || "—"]),
-      { fontSize: 7 });
-  }
-
-  footers(doc, "Kong Auth Analysis", n);
-  doc.save(`kong-auth-${stamp()}.pdf`);
+    if (recentFailures.length > 0) {
+      tableSection(doc, y, `Falhas Recentes (últimas ${recentFailures.length})`,
+        [["Horário", "Status", "Username", "IP", "Path", "Module"]],
+        recentFailures.map(r => [ts(r.timestamp), r.status_code, r.username || "—", r.client_ip || "—", r.path || "—", r.module || "—"]),
+        { fontSize: 7, needPage: 40 });
+    }
+  });
 }
 
 // ── Dashboard ──────────────────────────────────────────────────────────────
 export function exportDashboardPdf(
-  stats: StatsSummary,
-  timeline: TimelineEntry[],
-  names: Record<string, string>,
-  authStats: AuthErrorStats | null,
+  stats: StatsSummary, timeline: TimelineEntry[],
+  names: Record<string, string>, authStats: AuthErrorStats | null,
 ) {
-  const doc = createDoc();
-  const { startY, now: n } = header(doc, "Dashboard — Resumo de Eventos");
+  withDocument("Dashboard — Resumo de Eventos", "Dashboard", "dashboard", (doc, startY) => {
+    let y = summaryBox(doc, startY, [
+      ["Total de Eventos", nfmt(stats.total)],
+      ["Erros",            nfmt(stats.errors), RED],
+      ["Falhas de Auth",   nfmt(authStats?.total ?? 0), ORANGE],
+    ]);
 
-  let y = summaryBox(doc, startY, [
-    ["Total de Eventos",  stats.total.toLocaleString("pt-BR")],
-    ["Erros",            stats.errors.toLocaleString("pt-BR"), RED],
-    ["Falhas de Auth",   (authStats?.total ?? 0).toLocaleString("pt-BR"), ORANGE],
-  ]);
+    y = tableSection(doc, y, "Distribuição por Nível",
+      [["Nível", "Eventos"]],
+      stats.byLevel.map(l => [l.level, nfmt(l.count)]));
 
-  // By level
-  y = checkPage(doc, y, 35);
-  y = section(doc, y, "Distribuição por Nível");
-  y = table(doc, y, [["Nível", "Eventos"]],
-    stats.byLevel.map((l) => [l.level, parseInt(l.count).toLocaleString("pt-BR")]));
-
-  // Timeline
-  if (timeline.length > 0) {
-    const timeMap: Record<string, Record<string, number>> = {};
-    for (const e of timeline) {
-      const h = format(new Date(e.hour), "dd/MM HH:mm", { locale: ptBR });
-      if (!timeMap[h]) timeMap[h] = {};
-      timeMap[h][e.level] = parseInt(e.count);
+    if (timeline.length > 0) {
+      const timeMap: Record<string, Record<string, number>> = {};
+      for (const e of timeline) {
+        const h = hfmt(e.hour);
+        (timeMap[h] ??= {})[e.level] = parseInt(e.count);
+      }
+      const levels = [...new Set(timeline.map(t => t.level))];
+      y = tableSection(doc, y, "Timeline — Últimas 24h (por hora)",
+        [["Hora", ...levels]],
+        Object.entries(timeMap).map(([h, lv]) => [h, ...levels.map(l => lv[l] ?? 0)]),
+        { needPage: 40 });
     }
-    const levels = [...new Set(timeline.map((t) => t.level))];
-    y = checkPage(doc, y, 40);
-    y = section(doc, y, "Timeline — Últimas 24h (por hora)");
-    y = table(doc, y, [["Hora", ...levels]],
-      Object.entries(timeMap).map(([h, lv]) => [h, ...levels.map((l) => lv[l] ?? 0)]));
-  }
 
-  // Top errors
-  if (stats.topErrors.length > 0) {
-    y = checkPage(doc, y, 40);
-    y = section(doc, y, "Top Erros por Mensagem", RED);
-    y = table(doc, y, [["Mensagem", "Ocorrências"]],
-      stats.topErrors.map((e) => [e.message || "—", parseInt(e.count).toLocaleString("pt-BR")]),
-      { color: RED });
-  }
+    if (stats.topErrors.length > 0) {
+      y = tableSection(doc, y, "Top Erros por Mensagem",
+        [["Mensagem", "Ocorrências"]],
+        stats.topErrors.map(e => [e.message || "—", nfmt(e.count)]),
+        { color: RED, needPage: 40 });
+    }
 
-  // Top users
-  if (stats.topUsers.length > 0) {
-    y = checkPage(doc, y, 40);
-    y = section(doc, y, "Usuários com Mais Eventos");
-    y = table(doc, y, [["User ID", "Nome", "Eventos"]],
-      stats.topUsers.map((u) => [u.user_id, names[u.user_id] || "—", parseInt(u.count).toLocaleString("pt-BR")]));
-  }
+    if (stats.topUsers.length > 0) {
+      y = tableSection(doc, y, "Usuários com Mais Eventos",
+        [["User ID", "Nome", "Eventos"]],
+        stats.topUsers.map(u => [u.user_id, names[u.user_id] || "—", nfmt(u.count)]),
+        { needPage: 40 });
+    }
 
-  // Top services
-  if (stats.topServices?.length > 0) {
-    y = checkPage(doc, y, 35);
-    y = section(doc, y, "Top Serviços");
-    y = table(doc, y, [["Serviço", "Eventos"]],
-      stats.topServices.map((s) => [s.service, parseInt(s.count).toLocaleString("pt-BR")]));
-  }
+    if (stats.topServices?.length > 0) {
+      y = tableSection(doc, y, "Top Serviços",
+        [["Serviço", "Eventos"]],
+        stats.topServices.map(s => [s.service, nfmt(s.count)]));
+    }
 
-  // Auth errors top users
-  if (authStats && authStats.topUsers.length > 0) {
-    y = checkPage(doc, y, 40);
-    y = section(doc, y, "Top Usuários com Falha de Autenticação", ORANGE);
-    table(doc, y, [["Email", "Falhas", "Último"]],
-      authStats.topUsers.map((u) => [u.email, u.count, ts(u.last_seen)]),
-      { color: ORANGE });
-  }
-
-  footers(doc, "Dashboard", n);
-  doc.save(`dashboard-${stamp()}.pdf`);
+    if (authStats && authStats.topUsers.length > 0) {
+      tableSection(doc, y, "Top Usuários com Falha de Autenticação",
+        [["Email", "Falhas", "Último"]],
+        authStats.topUsers.map(u => [u.email, u.count, ts(u.last_seen)]),
+        { color: ORANGE, needPage: 40 });
+    }
+  });
 }
 
 // ── Auth Errors ────────────────────────────────────────────────────────────
 export function exportAuthErrorPdf(stats: AuthErrorStats) {
-  const doc = createDoc();
-  const { startY, now: n } = header(doc, "Falhas de Autenticação — /connect/token");
+  withDocument("Falhas de Autenticação — /connect/token", "Falhas de Autenticação", "auth-errors", (doc, startY) => {
+    const peak = stats.timeline.reduce(
+      (m, t) => parseInt(t.count) > parseInt(m.count) ? t : m,
+      { hour: "", count: "0", unique_users: "0" },
+    );
 
-  const peak = stats.timeline.reduce((m, t) => parseInt(t.count) > parseInt(m.count) ? t : m,
-    { hour: "", count: "0", unique_users: "0" });
+    let y = summaryBox(doc, startY, [
+      ["Total de Falhas",   nfmt(stats.total), RED],
+      ["Usuários afetados", nfmt(stats.topUsers.length), ORANGE],
+      ["Pico (hora)",       `${peak.count} erros`, ORANGE],
+      ["Principal Client",  stats.topClients[0]?.client_id || "—"],
+    ]);
 
-  let y = summaryBox(doc, startY, [
-    ["Total de Falhas",   stats.total.toLocaleString("pt-BR"), RED],
-    ["Usuários afetados", stats.topUsers.length.toLocaleString("pt-BR"), ORANGE],
-    ["Pico (hora)",       `${peak.count} erros`, ORANGE],
-    ["Principal Client",  stats.topClients[0]?.client_id || "—"],
-  ]);
+    if (stats.timeline.length > 0) {
+      y = tableSection(doc, y, "Timeline — Falhas por Hora",
+        [["Hora", "Falhas", "Usuários únicos"]],
+        stats.timeline.map(t => [hfmt(t.hour), t.count, t.unique_users]),
+        { color: RED, needPage: 40 });
+    }
 
-  // Timeline
-  if (stats.timeline.length > 0) {
-    y = checkPage(doc, y, 40);
-    y = section(doc, y, "Timeline — Falhas por Hora", RED);
-    y = table(doc, y, [["Hora", "Falhas", "Usuários únicos"]],
-      stats.timeline.map((t) => [format(new Date(t.hour), "dd/MM HH:mm", { locale: ptBR }), t.count, t.unique_users]),
-      { color: RED });
-  }
+    if (stats.topUsers.length > 0) {
+      y = tableSection(doc, y, `Usuários com Mais Falhas (${stats.topUsers.length})`,
+        [["Email", "Falhas", "Último"]],
+        stats.topUsers.map(u => [u.email, u.count, ts(u.last_seen)]),
+        { needPage: 40 });
+    }
 
-  // Top users
-  if (stats.topUsers.length > 0) {
-    y = checkPage(doc, y, 40);
-    y = section(doc, y, `Usuários com Mais Falhas (${stats.topUsers.length})`);
-    y = table(doc, y, [["Email", "Falhas", "Último"]],
-      stats.topUsers.map((u) => [u.email, u.count, ts(u.last_seen)]));
-  }
+    if (stats.topClients.length > 0) {
+      y = tableSection(doc, y, "Client IDs Envolvidos",
+        [["Client ID", "Falhas"]],
+        stats.topClients.map(c => [c.client_id, c.count]));
+    }
 
-  // Top clients
-  if (stats.topClients.length > 0) {
-    y = checkPage(doc, y, 35);
-    y = section(doc, y, "Client IDs Envolvidos");
-    y = table(doc, y, [["Client ID", "Falhas"]],
-      stats.topClients.map((c) => [c.client_id, c.count]));
-  }
-
-  // Recent events
-  if (stats.recentEvents.length > 0) {
-    y = checkPage(doc, y, 40);
-    y = section(doc, y, `Eventos Recentes (${stats.recentEvents.length})`, RED);
-    table(doc, y, [["Horário", "Nível", "Trace ID", "Path"]],
-      stats.recentEvents.map((e) => [
-        ts(e.timestamp),
-        e.level,
-        e.trace_id ? e.trace_id.slice(0, 16) + "…" : "—",
-        e.request_path || "—",
-      ]),
-      { fontSize: 7, color: RED });
-  }
-
-  footers(doc, "Falhas de Autenticação", n);
-  doc.save(`auth-errors-${stamp()}.pdf`);
+    if (stats.recentEvents.length > 0) {
+      tableSection(doc, y, `Eventos Recentes (${stats.recentEvents.length})`,
+        [["Horário", "Nível", "Trace ID", "Path"]],
+        stats.recentEvents.map(e => [
+          ts(e.timestamp), e.level,
+          e.trace_id ? e.trace_id.slice(0, 16) + "…" : "—",
+          e.request_path || "—",
+        ]),
+        { fontSize: 7, color: RED, needPage: 40 });
+    }
+  });
 }
 
 // ── Threat Report ──────────────────────────────────────────────────────────
@@ -428,133 +386,119 @@ const RISK_COLOR: Record<RiskLevel, string> = {
 };
 
 export function exportThreatReportPdf(report: ThreatReport) {
-  const doc  = createDoc();
-  const rLvl = report.riskLevel;
-  const { startY, now: n } = header(
-    doc,
+  withDocument(
     "Relatório de Ameaças Cibernéticas",
+    "Relatório de Ameaças",
+    "relatorio-ameacas",
+    (doc, startY) => {
+      const rLvl = report.riskLevel;
+
+      let y = summaryBox(doc, startY, [
+        ["Risco Geral",         RISK_LABEL[rLvl],                                          RISK_COLOR[rLvl]],
+        ["Ameaças Detectadas",  String(report.findings.length),                            report.findings.length > 0 ? ORANGE : GREEN],
+        ["Seq — Eventos",       nfmt(report.sources.seq.events),                            report.sources.seq.ok ? GREEN : RED],
+        ["Datadog — Alertas",   String(report.sources.datadog.alerts),                      report.sources.datadog.ok ? (report.sources.datadog.alerts > 0 ? ORANGE : GREEN) : RED],
+        ["GoCache — Bloqueios", nfmt(report.sources.gocache.blocked),                       report.sources.gocache.ok ? (report.sources.gocache.blocked > 0 ? ORANGE : GREEN) : RED],
+        ["Gerado em",           hfmt(report.generatedAt)],
+      ]);
+
+      y = tableSection(doc, y, "Fontes de Dados",
+        [["Fonte", "Status", "Período", "Métrica"]],
+        [
+          ["Seq (Logs de Aplicação)", report.sources.seq.ok     ? "OK" : "ERRO", "Acumulado",   `${nfmt(report.sources.seq.events)} eventos`],
+          ["Datadog (Monitores)",     report.sources.datadog.ok ? "OK" : "ERRO", "Tempo real",  `${report.sources.datadog.alerts} monitor(es) em alerta`],
+          ["GoCache WAF",             report.sources.gocache.ok ? "OK" : "ERRO", "Últimas 24h", `${nfmt(report.sources.gocache.blocked)} eventos bloqueados`],
+        ],
+        {
+          fontSize: 8,
+          columnStyles: { 1: { cellWidth: 22 } },
+          didParseCell: (data) => {
+            if (data.column.index === 1 && data.section === "body") {
+              data.cell.styles.textColor = data.cell.text[0] === "OK" ? GREEN : RED;
+              data.cell.styles.fontStyle = "bold";
+            }
+          },
+        });
+
+      y = checkPage(doc, y, 40);
+      y = section(doc, y, `Ameaças Detectadas — ${report.findings.length} achado(s)`, RISK_COLOR[rLvl]);
+
+      if (report.findings.length === 0) {
+        doc.setFontSize(9);
+        doc.setFont("helvetica", "italic");
+        doc.setTextColor(GREEN);
+        doc.text("Nenhuma ameaça crítica identificada nas últimas 24 horas.", 14, y);
+        doc.setTextColor("#000");
+        y += 8;
+      } else {
+        y = table(doc, y,
+          [["Risco", "Regra", "Título", "Descrição"]],
+          report.findings.map(f => [RISK_LABEL[f.risk], f.rule, f.title, f.description]),
+          {
+            columnStyles: { 0: { cellWidth: 18 }, 1: { cellWidth: 38 }, 2: { cellWidth: 50 }, 3: { cellWidth: 76 } },
+            didParseCell: (data) => {
+              if (data.column.index === 0 && data.section === "body") {
+                const lbl = data.cell.text[0];
+                const col = (Object.entries(RISK_LABEL).find(([, v]) => v === lbl)?.[0]) as RiskLevel | undefined;
+                data.cell.styles.textColor = col ? RISK_COLOR[col] : GRAY;
+                data.cell.styles.fontStyle = "bold";
+              }
+            },
+          });
+
+        for (const f of report.findings) {
+          if (f.evidence.length === 0) continue;
+          const fColor = RISK_COLOR[f.risk];
+          y = tableSection(doc, y, `${RISK_LABEL[f.risk]} · ${f.title}`,
+            [["Evidências"]],
+            f.evidence.map(ev => [ev]),
+            { color: fColor });
+          y -= 2;
+        }
+      }
+
+      y = checkPage(doc, y, 40);
+      y = section(doc, y, "Análise IA");
+
+      for (const line of report.narrative.split("\n").filter(l => l.trim() !== "")) {
+        const trimmed   = line.trim();
+        const isHeading = /^\*\*[^*]+\*\*/.test(trimmed) || /^#{1,3}\s/.test(trimmed);
+        const isBullet  = /^[•\-*] /.test(trimmed) && !isHeading;
+        const cleaned   = trimmed
+          .replace(/^\*\*(.+)\*\*$/, "$1")
+          .replace(/^#{1,3}\s/, "")
+          .replace(/\*\*(.+?)\*\*/g, "$1")
+          .trim();
+
+        if (isHeading) {
+          y = checkPage(doc, y, 12);
+          doc.setFont("helvetica", "bold");
+          doc.setFontSize(9.5);
+          doc.setTextColor(BRAND);
+          doc.text(cleaned, 14, y);
+          y += 6;
+        } else if (isBullet || cleaned) {
+          const body    = isBullet ? `- ${cleaned.replace(/^[•\-*]\s*/, "")}` : cleaned;
+          const wrapped = doc.splitTextToSize(body, isBullet ? 174 : 182);
+          y = checkPage(doc, y, wrapped.length * 4.5 + 2);
+          doc.setFont("helvetica", "normal");
+          doc.setFontSize(8.5);
+          doc.setTextColor("#374151");
+          doc.text(wrapped, isBullet ? 18 : 14, y);
+          y += wrapped.length * 4.5 + 1;
+        }
+      }
+
+      y += 4;
+      y = checkPage(doc, y, 10);
+      doc.setFont("helvetica", "italic");
+      doc.setFontSize(7);
+      doc.setTextColor(GRAY);
+      doc.text(
+        "Esta analise foi gerada automaticamente por IA e deve ser revisada por um analista de seguranca.",
+        14, y, { maxWidth: 182 },
+      );
+    },
     "Ituran · integra-prd · Análise Automatizada",
   );
-
-  // ── Summary box ────────────────────────────────────────────────────────────
-  let y = summaryBox(doc, startY, [
-    ["Risco Geral",         RISK_LABEL[rLvl],                                             RISK_COLOR[rLvl]],
-    ["Ameaças Detectadas",  report.findings.length.toString(),                             report.findings.length > 0 ? ORANGE : GREEN],
-    ["Seq — Eventos",       report.sources.seq.events.toLocaleString("pt-BR"),             report.sources.seq.ok     ? GREEN : RED],
-    ["Datadog — Alertas",   report.sources.datadog.alerts.toString(),                      report.sources.datadog.ok ? (report.sources.datadog.alerts > 0 ? ORANGE : GREEN) : RED],
-    ["GoCache — Bloqueios", report.sources.gocache.blocked.toLocaleString("pt-BR"),        report.sources.gocache.ok ? (report.sources.gocache.blocked > 0 ? ORANGE : GREEN) : RED],
-    ["Gerado em",           format(new Date(report.generatedAt), "dd/MM/yyyy HH:mm", { locale: ptBR })],
-  ]);
-
-  // ── Sources table ──────────────────────────────────────────────────────────
-  y = checkPage(doc, y, 35);
-  y = section(doc, y, "Fontes de Dados");
-  y = table(doc, y,
-    [["Fonte", "Status", "Período", "Métrica"]],
-    [
-      ["Seq (Logs de Aplicação)", report.sources.seq.ok     ? "OK" : "ERRO", "Acumulado",  `${report.sources.seq.events.toLocaleString("pt-BR")} eventos`],
-      ["Datadog (Monitores)",     report.sources.datadog.ok ? "OK" : "ERRO", "Tempo real", `${report.sources.datadog.alerts} monitor(es) em alerta`],
-      ["GoCache WAF",             report.sources.gocache.ok ? "OK" : "ERRO", "Últimas 24h", `${report.sources.gocache.blocked.toLocaleString("pt-BR")} eventos bloqueados`],
-    ],
-    {
-      fontSize: 8,
-      columnStyles: { 1: { cellWidth: 22 } },
-      didParseCell: (data) => {
-        if (data.column.index === 1 && data.section === "body") {
-          data.cell.styles.textColor = data.cell.text[0] === "OK" ? GREEN : RED;
-          data.cell.styles.fontStyle = "bold";
-        }
-      },
-    });
-
-  // ── Findings ───────────────────────────────────────────────────────────────
-  y = checkPage(doc, y, 40);
-  y = section(doc, y, `Ameaças Detectadas — ${report.findings.length} achado(s)`, RISK_COLOR[rLvl]);
-
-  if (report.findings.length === 0) {
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "italic");
-    doc.setTextColor(GREEN);
-    doc.text("Nenhuma ameaça crítica identificada nas últimas 24 horas.", 14, y);
-    doc.setTextColor("#000");
-    y += 8;
-  } else {
-    // Findings overview table
-    y = table(doc, y,
-      [["Risco", "Regra", "Título", "Descrição"]],
-      report.findings.map((f) => [RISK_LABEL[f.risk], f.rule, f.title, f.description]),
-      {
-        columnStyles: { 0: { cellWidth: 18 }, 1: { cellWidth: 38 }, 2: { cellWidth: 50 }, 3: { cellWidth: 76 } },
-        didParseCell: (data) => {
-          if (data.column.index === 0 && data.section === "body") {
-            const lbl = data.cell.text[0] as RiskLevel;
-            const col = Object.entries(RISK_LABEL).find(([, v]) => v === lbl)?.[0] as RiskLevel | undefined;
-            data.cell.styles.textColor = col ? RISK_COLOR[col] : GRAY;
-            data.cell.styles.fontStyle = "bold";
-          }
-        },
-      });
-
-    // Per-finding evidence detail
-    for (const f of report.findings) {
-      if (f.evidence.length === 0) continue;
-      y = checkPage(doc, y, 30);
-      const fColor = RISK_COLOR[f.risk];
-      y = section(doc, y, `${RISK_LABEL[f.risk]} · ${f.title}`, fColor);
-      y = table(doc, y, [["Evidências"]], f.evidence.map((ev) => [ev]), { color: fColor });
-      y -= 2; // evidência usa +4 em vez de +6 — ajusta margem
-    }
-  }
-
-  // ── AI Narrative ───────────────────────────────────────────────────────────
-  y = checkPage(doc, y, 40);
-  y = section(doc, y, "Análise IA");
-
-  const narrativeLines = report.narrative.split("\n").filter((l) => l.trim() !== "");
-  for (const line of narrativeLines) {
-    const trimmed   = line.trim();
-    const isHeading = /^\*\*[^*]+\*\*/.test(trimmed) || /^#{1,3}\s/.test(trimmed);
-    const isBullet  = /^[•\-*] /.test(trimmed) && !isHeading;
-    const cleaned   = trimmed
-      .replace(/^\*\*(.+)\*\*$/, "$1")
-      .replace(/^#{1,3}\s/, "")
-      .replace(/\*\*(.+?)\*\*/g, "$1")
-      .trim();
-
-    if (isHeading) {
-      y = checkPage(doc, y, 12);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(9.5);
-      doc.setTextColor(BRAND);
-      doc.text(cleaned, 14, y);
-      y += 6;
-    } else if (isBullet) {
-      const body    = cleaned.replace(/^[•\-*]\s*/, "");
-      const wrapped = doc.splitTextToSize(`- ${body}`, 174);
-      y = checkPage(doc, y, wrapped.length * 4.5 + 2);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8.5);
-      doc.setTextColor("#374151");
-      doc.text(wrapped, 18, y);
-      y += wrapped.length * 4.5 + 1;
-    } else if (cleaned) {
-      const wrapped = doc.splitTextToSize(cleaned, 182);
-      y = checkPage(doc, y, wrapped.length * 4.5 + 2);
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(8.5);
-      doc.setTextColor("#374151");
-      doc.text(wrapped, 14, y);
-      y += wrapped.length * 4.5 + 1;
-    }
-  }
-
-  y += 4;
-  y = checkPage(doc, y, 10);
-  doc.setFont("helvetica", "italic");
-  doc.setFontSize(7);
-  doc.setTextColor(GRAY);
-  doc.text("Esta analise foi gerada automaticamente por IA e deve ser revisada por um analista de seguranca.", 14, y, { maxWidth: 182 });
-
-  footers(doc, "Relatório de Ameaças", n);
-  doc.save(`relatorio-ameacas-${stamp()}.pdf`);
 }
