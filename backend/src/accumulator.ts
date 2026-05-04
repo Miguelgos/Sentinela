@@ -175,22 +175,26 @@ async function syncFullHistory(): Promise<void> {
   _syncProgress.loaded = 0;
   _syncProgress.error = null;
 
-  console.log(`[accumulator] sync inicial: ${RETENTION_DAYS} dias em paralelo`);
+  console.log(`[accumulator] sync inicial: ${RETENTION_DAYS} dias`);
 
-  // Dias são independentes — paralelizar reduz cold-start ~7x. Limite de
-  // concorrência implícito é o agente HTTP do Node (não há pool externo).
-  const days = Array.from({ length: RETENTION_DAYS }, (_, i) => i + 1);
-  const results = await Promise.all(days.map(syncDay));
+  // Sequencial — paralelizar com Promise.all causou OOM (exit 134) porque
+  // 7 dias × 50k events ficavam em memória simultaneamente antes do addToStore.
+  // Sequencial: cada dia é absorvido (compactEvent reduz pra ~5KB) e o array
+  // intermediário é GC'd antes do próximo dia.
+  for (let d = 1; d <= RETENTION_DAYS; d++) {
+    const events = await syncDay(d);
+    if (events.length > 0) {
+      addToStore(events);
+      _syncProgress.loaded += events.length;
 
-  for (const events of results) addToStore(events);
-  _syncProgress.loaded = results.reduce((s, ev) => s + ev.length, 0);
-
-  // raw[0] do dia 1 é o evento mais recente (Seq retorna em ordem desc)
-  if (!_latestSeqId && results[0]?.[0]?.event_id) {
-    _latestSeqId = results[0][0].event_id;
+      // Dia 1 traz os eventos mais recentes (Seq retorna em ordem desc)
+      if (d === 1 && !_latestSeqId && events[0]?.event_id) {
+        _latestSeqId = events[0].event_id;
+      }
+    }
+    applyMaxEventsCap();
   }
 
-  applyMaxEventsCap();
   _syncProgress.phase = "done";
   _syncProgress.finishedAt = new Date().toISOString();
   console.log(`[accumulator] sync completo: ${_syncProgress.loaded} eventos | store: ${_store.size}`);
