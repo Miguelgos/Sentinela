@@ -16,3 +16,7 @@ README.md
 Dockerfile
 docker-compose.yml
 app.config.timestamp_*.js
+tests
+playwright.config.ts
+playwright-report
+test-results

@@ -30,3 +30,8 @@ frontend/.vite/
 
 # PostgreSQL / Docker volumes
 pgdata/
+
+# Playwright
+playwright-report/
+test-results/
+playwright/.cache/
