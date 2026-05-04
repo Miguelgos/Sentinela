@@ -1,72 +1,114 @@
-# Deploy em Kubernetes
+# Deploy — Kubernetes (`integra-prd` em `cluster-bra-prd`)
 
-## Cluster alvo
+URL pública: <https://crm.ituran.sp/sentinela>
 
-- **Cluster:** `cluster-bra-prd`
-- **Namespace:** `integra-prd`
-- **URL pública:** `https://crm.ituran.sp/sentinela`
-- **Basepath:** `/sentinela` (configurado em `vite.config.ts` e `createRouter`)
+## Pipeline (Azure DevOps)
 
-## Fluxo de deploy
+| | |
+|---|---|
+| Pipeline | `sentinela` (id 630, folder `\app\utils`) |
+| YAML | `pipeline/app/integra/sentinela.yml` no repo `TI/pipeline` |
+| Trigger | push em `main` do GitHub `ituran-bra/Sentinela` |
+| Service Connection | `github.com_ituran-bra` (GitHub App) |
+| Output | `ituran.azurecr.io/integra/sentinela:1.0.<BuildId>` + `:latest` |
+
+Build standalone — não usa `_templates/pipeline-build-images.yml`. Webhook do GitHub é registrado depois do 1º run manual.
+
+## Imagem
+
+Multi-stage com pnpm e `node-linker=hoisted` (sem isso o `COPY` cross-stage do `node_modules` leva 100+ s por causa dos hardlinks).
 
 ```
-commit em master (github.com/ituran-bra/Sentinela)
-  → Azure DevOps pipeline/app/integra/sentinela.yml
-    → Docker build (node:24-alpine, multi-stage, non-root)
-    → Push: ituran.azurecr.io/integra/sentinela:<BuildId>
-    → Bump tag em pipeline/k8s/cluster-bra-prd/integra-prd/apps/sentinela.yml
-      → pipeline/k8s/cluster-bra-prd.yml (kubectl apply)
-        → Rolling update (maxSurge: 0, maxUnavailable: 1)
+deps      (pnpm install --frozen-lockfile)
+  → build (vite build → dist/)
+  → prod-deps (pnpm install --prod)
+  → runtime (Node 24 alpine, tini, non-root, copia dist + prod node_modules + node-server.mjs)
 ```
 
-## Manifesto (resumo)
+CMD: `node node-server.mjs`. Expõe `:3000`.
 
-Arquivo único em `pipeline/k8s/cluster-bra-prd/integra-prd/apps/sentinela.yml`:
+## Kong (gateway)
 
-| Recurso | Configuração relevante |
-|---------|----------------------|
-| ConfigMap `sentinela-config` | `PORT=3000`, `SEQ_URL`, `DD_SITE`, `GRAFANA_URL`, etc. |
-| Secret `sentinela-secrets` | `azure-openai-api-key`, `grafana-token`, `dd-api-key`, etc. |
-| Deployment `sentinela` | `replicas: 1`, `image: ituran.azurecr.io/integra/sentinela:vX.Y.Z` |
-| Service `sentinela` | `ClusterIP`, porta 80 → containerPort 3000 |
-| Ingress `sentinela-ingress` | `host: crm.ituran.sp`, `path: /sentinela`, `pathType: Prefix` |
-
-## Recursos do container
+Não há Ingress — Kong em DBless mode tem rota declarativa em `pipeline/k8s/cluster-bra-prd/2-routes.yml`:
 
 ```yaml
-resources:
-  requests: { memory: "256Mi", cpu: "100m" }
-  limits:   { memory: "768Mi", cpu: "1" }
+- url: http://sentinela.integra-prd:80/
+  routes:
+  - regex_priority: 0
+    hosts:
+    - crm.ituran.sp
+    paths:
+    - ~/(?i)sentinela
+    strip_path: false   # app tem basepath /sentinela no router
+  retries: 0
 ```
 
-## Probes
+Na frente do Kong tem F5 BigIP (cookie `BIGipServerPOOL_INTEGRA-NOVA`).
 
-Todas apontam para `/sentinela/api/health` (basepath obrigatório):
+## Manifesto (`apps/sentinela.yml`)
 
-| Probe | periodSeconds | failureThreshold |
-|-------|--------------|-----------------|
-| startupProbe | 5 | 30 (tolera ~150s de catch-up) |
-| readinessProbe | 3 | 3 |
-| livenessProbe | 30 | 3 |
+| Recurso | Detalhe |
+|---|---|
+| `ConfigMap sentinela-config` | `PORT`, `SEQ_URL`, `DD_SITE`, `GRAFANA_URL`, `LOKI_AUDIT_UID`, `AZURE_OPENAI_*` |
+| `Secret sentinela-secrets` | `AZURE_OPENAI_KEY`, `DD_API_KEY`, `DD_APP_KEY`, `GC_TOKEN`, `GRAFANA_TOKEN`, `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY` |
+| `Deployment sentinela` | `replicas: 1`, label `app: sentinela` (Promtail), Datadog tags, Keel auto-pull tag `latest` |
+| `Service sentinela` | ClusterIP `:80 → :3000` |
 
-## Secrets — aplicar antes do primeiro deploy
+`envFrom` traz **`appsettings-prd`** (ConfigMap compartilhado) — isso entrega `ConnectionStrings__ITURANWEB` para o lookup MSSQL sem credencial duplicada.
 
-Substituir os `REPLACE_ME` com valores reais. Duas opções:
+## Recursos do pod
 
-- **Opção 1:** `echo -n "valor" | base64 -w 0` → trocar `stringData` por `data` e commitar no
-  repo `pipeline` (padrão Ituran, seguido por `itulink.yml`/`seq.yml`).
-- **Opção 2:** `kubectl apply` manual do Secret fora do Git; remover bloco `Secret` do manifesto.
+```yaml
+requests:  { memory: "256Mi", cpu: "100m" }
+limits:    { memory: "768Mi", cpu: "1" }
+```
 
-## Pré-requisitos do cluster
+## Probes (todas em `/sentinela/api/health`)
 
-- [ ] Secret `sentinela-secrets` aplicado
-- [ ] Egress para todos os endpoints externos (ver `docs/architecture/integrations.md`)
-- [ ] Deployment `sentinela` configurado no Azure Foundry (`iturin-ai-eastus2`)
-- [ ] `GRAFANA_TOKEN` provisionado com acesso de leitura aos datasources `prometheus` e Loki
+| | period | failure |
+|---|---|---|
+| startup | 5 s | 30 (~150 s) |
+| readiness | 3 s | 3 |
+| liveness | 30 s | 3 |
 
-## Rollback
+## Keel (deploy automático)
+
+```yaml
+keel.sh/policy: force
+keel.sh/match-tag: "true"
+keel.sh/pollSchedule: '@every 30s'
+keel.sh/trigger: poll
+```
+
+Pipeline empurra `:latest` no ACR → Keel detecta SHA novo em ~30 s → rolling update do pod. Não há bump manual de YAML.
+
+## Promtail/Loki
+
+Captura pods com label `app=<name>` que casa com regex em `promtail-config` (ConfigMap no ns `monitoring`, não versionado no repo `pipeline`). Pra adicionar app, editar regex e `kubectl rollout restart daemonset/promtail -n monitoring`.
+
+## Pré-requisitos pra novo cluster
+
+- Egress liberado para Seq, Datadog, GoCache, Grafana, Azure OpenAI, MSSQL (vide [`integrations.md`](../architecture/integrations.md))
+- Deployment `sentinela` no Azure Foundry (`iturin-ai-eastus2`) provisionado pela equipe IA
+- `GRAFANA_TOKEN` com leitura nos datasources `prometheus` e `integra-audit` (Loki)
+- `sentinela-secrets` aplicado com valores reais antes do 1º apply
+- `sentinela` na regex do Promtail
+
+## Runbook rápido
 
 ```bash
-# Alterar tag da imagem no manifesto para a versão anterior e re-aplicar
-kubectl rollout undo deployment/sentinela -n integra-prd
+KUBECONFIG=~/.kube/br-prd kubectl -n integra-prd \
+  rollout status deployment/sentinela
+KUBECONFIG=~/.kube/br-prd kubectl -n integra-prd \
+  logs -l app=sentinela --tail=100
+KUBECONFIG=~/.kube/br-prd kubectl -n integra-prd \
+  top pod -l app=sentinela
+curl -ks https://crm.ituran.sp/sentinela/api/health
+```
+
+Forçar rollout (Keel não pegou):
+
+```bash
+KUBECONFIG=~/.kube/br-prd kubectl -n integra-prd \
+  delete pod -l app=sentinela
 ```
