@@ -1,5 +1,13 @@
 import https from "https";
 
+// Defensivo: aceita endpoint com ou sem o sufixo /chat/completions.
+// Em prd o secret guarda só ".../openai/v1" e o app precisa adicionar
+// o path da operação. Local pode estar configurado com path completo.
+function chatCompletionsUrl(endpoint: string): string {
+  const trimmed = endpoint.replace(/\/+$/, "");
+  return /\/chat\/completions$/.test(trimmed) ? trimmed : `${trimmed}/chat/completions`;
+}
+
 export async function aiNarrative(prompt: string): Promise<string> {
   const endpoint   = process.env.AZURE_OPENAI_ENDPOINT   || "";
   const apiKey     = process.env.AZURE_OPENAI_KEY        || "";
@@ -12,7 +20,7 @@ export async function aiNarrative(prompt: string): Promise<string> {
   });
 
   return new Promise((resolve, reject) => {
-    const url = new URL(endpoint);
+    const url = new URL(chatCompletionsUrl(endpoint));
     const options: https.RequestOptions = {
       hostname:           url.hostname,
       path:               url.pathname + url.search,
