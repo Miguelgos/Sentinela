@@ -3,6 +3,21 @@ import { SeqApiEvent, parseSeqApiEvent } from "./types";
 
 export type ParsedEvent = ReturnType<typeof parseSeqApiEvent>;
 
+// O store mantém apenas o subset de raw_data que efetivamente é lido pelos
+// consumidores (Properties via prop()), descartando MessageTemplateTokens,
+// Links, EventType, Exception bruta etc. Reduz ~19KB → ~4KB por evento e
+// permite 100k em store dentro do limit 768Mi do pod.
+type CompactRaw = { Properties: SeqApiEvent["Properties"] };
+export type StoredEvent = Omit<ParsedEvent, "raw_data"> & { raw_data: CompactRaw };
+
+function compactEvent(p: ParsedEvent): StoredEvent {
+  const raw = p.raw_data as SeqApiEvent;
+  return {
+    ...p,
+    raw_data: { Properties: raw.Properties ?? [] },
+  };
+}
+
 const LEVEL_FILTER = "@Level in ['Warning', 'Error', 'Fatal']";
 
 const NOISE_SOURCES = new Set([
@@ -24,12 +39,12 @@ export function shouldStore(e: ParsedEvent): boolean {
 const RETENTION_DAYS = 7;
 const RETENTION_MS = RETENTION_DAYS * 86_400_000;
 
-// Cap: medido em prd, ~19KB residentes/evento × 30k ≈ 570MB, dentro do limit 768Mi do pod.
-// Cobre ~3 dias do volume atual (~10k eventos/dia). Para 7 dias completos seria
-// preciso subir resources.limits.memory no manifest k8s para ~1.5-2Gi.
-const MAX_EVENTS = 30_000;
+// Com store compacto (~4KB/evento), 100k cabem em ~400MB — bem dentro do
+// limit 768Mi. Volume atual: ~65k eventos/7d, então 100k dá margem ~50%
+// para crescimento.
+const MAX_EVENTS = 100_000;
 
-const _store = new Map<string, ParsedEvent>();
+const _store = new Map<string, StoredEvent>();
 let _latestSeqId: string | undefined;
 let _oldestTs: string | undefined;
 let _newestTs: string | undefined;
@@ -53,7 +68,7 @@ const _syncProgress: {
   error: null,
 };
 
-export function getEvents(): ParsedEvent[] {
+export function getEvents(): StoredEvent[] {
   return [..._store.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
 }
 export function isReady(): boolean { return _syncProgress.phase === "done"; }
@@ -68,7 +83,7 @@ export function getSyncProgress() {
 function addToStore(events: ParsedEvent[]): void {
   for (const p of events) {
     if (!p.event_id) continue;
-    _store.set(p.event_id, p);
+    _store.set(p.event_id, compactEvent(p));
     if (!_newestTs || p.timestamp > _newestTs) _newestTs = p.timestamp;
     if (!_oldestTs || p.timestamp < _oldestTs) _oldestTs = p.timestamp;
   }
