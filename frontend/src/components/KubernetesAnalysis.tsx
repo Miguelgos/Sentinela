@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { AlertTriangle, RefreshCw, CheckCircle, Layers } from "lucide-react";
 import { useAnalysisData } from "@/hooks/useAnalysisData";
 import { AnalysisShell } from "@/components/AnalysisShell";
+import { StatCard } from "@/components/analysis/StatCard";
 import {
   BarChart, Bar, XAxis, YAxis, Cell,
 } from "recharts";
@@ -66,18 +67,6 @@ function KubernetesContent({ data }: { data: GrafanaKubernetes }) {
 
   const replicasOk = salesbo.replicas.available >= salesbo.replicas.desired;
   const hasCritical = alerts.some((a) => a.severity.toLowerCase() === "critical");
-  const alertCountColor =
-    alerts.length === 0
-      ? "text-green-300"
-      : hasCritical
-      ? "text-red-300"
-      : "text-yellow-300";
-  const alertCardBorder =
-    alerts.length === 0
-      ? ""
-      : hasCritical
-      ? "border-red-500/40 ring-1 ring-red-500/30"
-      : "border-yellow-500/30";
 
   const cpuChartData = salesbo.pods.map((p: GrafanaPod) => ({
     name: podShortName(p.name),
@@ -99,56 +88,31 @@ function KubernetesContent({ data }: { data: GrafanaKubernetes }) {
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className={replicasOk ? "border-green-500/20" : "border-yellow-500/30"}>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Réplicas salesbo</p>
-            <p
-              className={`text-2xl font-bold ${
-                replicasOk ? "text-green-300" : "text-yellow-300"
-              }`}
-            >
-              {salesbo.replicas.available}/{salesbo.replicas.desired}
-            </p>
-            <p className="text-xs text-muted-foreground">disponíveis/desejadas</p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">CPU Total salesbo</p>
-            <p className="text-2xl font-bold text-blue-300">
-              {salesbo.totalCpuPct.toFixed(1)}%
-            </p>
-            <p className="text-xs text-muted-foreground">
-              ({salesbo.pods.length} pods)
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Memória Total salesbo</p>
-            <p className="text-2xl font-bold text-purple-300">
-              {salesbo.totalMemGb.toFixed(1)} GB
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className={alertCardBorder}>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Alertas Ativos</p>
-            <p className={`text-2xl font-bold ${alertCountColor}`}>
-              {alerts.length}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {alerts.length === 0
-                ? "nenhum alerta"
-                : hasCritical
-                ? "critical detectado"
-                : "warnings ativos"}
-            </p>
-          </CardContent>
-        </Card>
+        <StatCard
+          label="Réplicas salesbo"
+          value={`${salesbo.replicas.available}/${salesbo.replicas.desired}`}
+          sub="disponíveis/desejadas"
+          tone={replicasOk ? "success" : "warning"}
+          emphasizeBorder
+        />
+        <StatCard
+          label="CPU Total salesbo"
+          value={`${salesbo.totalCpuPct.toFixed(1)}%`}
+          sub={`(${salesbo.pods.length} pods)`}
+          tone="info"
+        />
+        <StatCard
+          label="Memória Total salesbo"
+          value={`${salesbo.totalMemGb.toFixed(1)} GB`}
+          tone="purple"
+        />
+        <StatCard
+          label="Alertas Ativos"
+          value={alerts.length}
+          sub={alerts.length === 0 ? "nenhum alerta" : hasCritical ? "critical detectado" : "warnings ativos"}
+          tone={alerts.length === 0 ? "success" : hasCritical ? "danger" : "warning"}
+          emphasizeBorder
+        />
       </div>
 
       {/* Alertas Prometheus */}

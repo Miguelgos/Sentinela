@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useAnalysisData } from "@/hooks/useAnalysisData";
 import { AnalysisShell } from "@/components/AnalysisShell";
+import { StatCard } from "@/components/analysis/StatCard";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
 } from "recharts";
@@ -112,11 +113,11 @@ export function KongAuthAnalysis() {
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 sm:grid-cols-5 gap-3">
-        <MetricCard label="Total Requests" value={(summary?.total ?? 0).toLocaleString("pt-BR")} color="border-muted" />
-        <MetricCard label="Falhas" value={(summary?.failures ?? 0).toLocaleString("pt-BR")} color="border-red-500/40" valueColor="text-red-400" />
-        <MetricCard label="Taxa de Falha" value={`${summary?.failurePct ?? 0}%`} color="border-orange-500/40" valueColor="text-orange-400" />
-        <MetricCard label="401 Unauthorized" value={(summary?.failures401 ?? 0).toLocaleString("pt-BR")} color="border-orange-500/30" />
-        <MetricCard label="500 Server Error" value={(summary?.failures500 ?? 0).toLocaleString("pt-BR")} color="border-red-700/40" valueColor="text-red-500" />
+        <StatCard label="Total Requests"   value={(summary?.total ?? 0).toLocaleString("pt-BR")} />
+        <StatCard label="Falhas"            value={(summary?.failures ?? 0).toLocaleString("pt-BR")}   tone="danger"  emphasizeBorder />
+        <StatCard label="Taxa de Falha"     value={`${summary?.failurePct ?? 0}%`}                      tone="warning" emphasizeBorder />
+        <StatCard label="401 Unauthorized"  value={(summary?.failures401 ?? 0).toLocaleString("pt-BR")} tone="warning" emphasizeBorder />
+        <StatCard label="500 Server Error"  value={(summary?.failures500 ?? 0).toLocaleString("pt-BR")} tone="danger"  emphasizeBorder />
       </div>
 
       {/* Alerts */}
@@ -374,19 +375,6 @@ export function KongAuthAnalysis() {
       </>
       )}
     </AnalysisShell>
-  );
-}
-
-function MetricCard({ label, value, color, valueColor }: {
-  label: string; value: string; color?: string; valueColor?: string;
-}) {
-  return (
-    <Card className={color}>
-      <CardContent className="p-4">
-        <p className="text-xs text-muted-foreground">{label}</p>
-        <p className={`text-2xl font-bold mt-1 ${valueColor || ""}`}>{value}</p>
-      </CardContent>
-    </Card>
   );
 }
 

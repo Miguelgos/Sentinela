@@ -4,6 +4,7 @@ import { Button } from "@/components/ui/button";
 import { Shield, AlertTriangle, Bot, Globe, Flame, RefreshCw } from "lucide-react";
 import { useAnalysisData } from "@/hooks/useAnalysisData";
 import { AnalysisShell } from "@/components/AnalysisShell";
+import { StatCard } from "@/components/analysis/StatCard";
 import {
   BarChart, Bar, XAxis, YAxis,
   LineChart, Line, CartesianGrid, Cell,
@@ -187,46 +188,38 @@ function GoCacheContent({ data }: { data: GoCacheOverview }) {
 
       {/* Summary cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="border-red-500/40 ring-1 ring-red-500/20">
-          <CardContent className="p-4 flex items-center gap-3">
-            <Shield className="h-6 w-6 text-red-400 shrink-0" />
-            <div>
-              <p className="text-xs text-muted-foreground">WAF Bloqueados</p>
-              <p className="text-2xl font-bold text-red-300">{summary.wafBlocked.toLocaleString("pt-BR")}</p>
-              <p className="text-xs text-muted-foreground">SQL/XSS/Injeção</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-orange-500/40">
-          <CardContent className="p-4 flex items-center gap-3">
-            <AlertTriangle className="h-6 w-6 text-orange-400 shrink-0" />
-            <div>
-              <p className="text-xs text-muted-foreground">Firewall Bloqueados</p>
-              <p className="text-2xl font-bold text-orange-300">{summary.firewallBlocked.toLocaleString("pt-BR")}</p>
-              <p className="text-xs text-muted-foreground">IPs na blacklist</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-purple-500/40">
-          <CardContent className="p-4 flex items-center gap-3">
-            <Bot className="h-6 w-6 text-purple-400 shrink-0" />
-            <div>
-              <p className="text-xs text-muted-foreground">Bots Bloqueados</p>
-              <p className="text-2xl font-bold text-purple-300">{botBlockedDisplay.toLocaleString("pt-BR")}</p>
-              <p className="text-xs text-muted-foreground">Detectados como bot</p>
-            </div>
-          </CardContent>
-        </Card>
-        <Card className="border-yellow-500/30">
-          <CardContent className="p-4 flex items-center gap-3">
-            <Bot className="h-6 w-6 text-yellow-400 shrink-0" />
-            <div>
-              <p className="text-xs text-muted-foreground">Bots (monitor)</p>
-              <p className="text-2xl font-bold text-yellow-300">{botSimulateDisplay.toLocaleString("pt-BR")}</p>
-              <p className="text-xs text-muted-foreground">Modo simulação</p>
-            </div>
-          </CardContent>
-        </Card>
+        <StatCard
+          icon={<Shield className="h-6 w-6 text-red-400 shrink-0" />}
+          label="WAF Bloqueados"
+          value={summary.wafBlocked.toLocaleString("pt-BR")}
+          sub="SQL/XSS/Injeção"
+          tone="danger"
+          emphasizeBorder
+        />
+        <StatCard
+          icon={<AlertTriangle className="h-6 w-6 text-orange-400 shrink-0" />}
+          label="Firewall Bloqueados"
+          value={summary.firewallBlocked.toLocaleString("pt-BR")}
+          sub="IPs na blacklist"
+          tone="warning"
+          emphasizeBorder
+        />
+        <StatCard
+          icon={<Bot className="h-6 w-6 text-purple-400 shrink-0" />}
+          label="Bots Bloqueados"
+          value={botBlockedDisplay.toLocaleString("pt-BR")}
+          sub="Detectados como bot"
+          tone="purple"
+          emphasizeBorder
+        />
+        <StatCard
+          icon={<Bot className="h-6 w-6 text-yellow-400 shrink-0" />}
+          label="Bots (monitor)"
+          value={botSimulateDisplay.toLocaleString("pt-BR")}
+          sub="Modo simulação"
+          tone="warning"
+          emphasizeBorder
+        />
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">

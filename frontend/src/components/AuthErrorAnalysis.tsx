@@ -6,6 +6,7 @@ import { EventDetail } from "@/components/EventDetail";
 import { ShieldAlert, Clock, Users, TrendingUp, User, FileDown, RefreshCw } from "lucide-react";
 import { useAnalysisData } from "@/hooks/useAnalysisData";
 import { AnalysisShell } from "@/components/AnalysisShell";
+import { StatCard } from "@/components/analysis/StatCard";
 import { exportAuthErrorPdf } from "@/lib/exportPdf";
 import {
   AreaChart, Area, XAxis, YAxis, CartesianGrid,
@@ -102,24 +103,27 @@ export function AuthErrorAnalysis() {
         </Card>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <MetricCard
+          <StatCard
             icon={<ShieldAlert className="h-5 w-5 text-red-400" />}
             label="Total de Falhas de Auth"
             value={(stats?.total || 0).toLocaleString("pt-BR")}
-            color="border-red-500/30"
+            tone="danger"
+            emphasizeBorder
           />
-          <MetricCard
+          <StatCard
             icon={<Users className="h-5 w-5 text-purple-400" />}
             label="Usuários com Falha"
             value={uniqueUsers.toLocaleString("pt-BR")}
-            color="border-purple-500/30"
+            tone="purple"
+            emphasizeBorder
           />
-          <MetricCard
+          <StatCard
             icon={<TrendingUp className="h-5 w-5 text-orange-400" />}
             label="Pico de Erros"
             value={peak.count}
-            subtitle={peak.hour ? format(new Date(peak.hour), "dd/MM HH:mm") : "—"}
-            color="border-orange-500/30"
+            sub={peak.hour ? format(new Date(peak.hour), "dd/MM HH:mm") : "—"}
+            tone="warning"
+            emphasizeBorder
           />
         </div>
 
@@ -292,21 +296,3 @@ export function AuthErrorAnalysis() {
   );
 }
 
-function MetricCard({ icon, label, value, subtitle, color }: {
-  icon: React.ReactNode; label: string; value: string; subtitle?: string; color?: string;
-}) {
-  return (
-    <Card className={color}>
-      <CardContent className="p-4">
-        <div className="flex items-center gap-3">
-          {icon}
-          <div>
-            <p className="text-xs text-muted-foreground">{label}</p>
-            <p className="text-2xl font-bold">{value}</p>
-            {subtitle && <p className="text-xs text-muted-foreground">{subtitle}</p>}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}

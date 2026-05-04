@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useAnalysisData } from "@/hooks/useAnalysisData";
 import { AnalysisShell } from "@/components/AnalysisShell";
+import { StatCard } from "@/components/analysis/StatCard";
 import {
   BarChart, Bar, XAxis, YAxis, PieChart, Pie, Cell,
 } from "recharts";
@@ -182,34 +183,32 @@ function DatadogContent({
 
       {/* Monitor state cards */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className={alertCount > 0 ? "border-red-500/40 ring-1 ring-red-500/30" : ""}>
-          <CardContent className="p-4 flex items-center gap-3">
-            <XCircle className="h-6 w-6 text-red-400 shrink-0" />
-            <div><p className="text-xs text-muted-foreground">Alert</p>
-              <p className="text-2xl font-bold text-red-300">{alertCount}</p></div>
-          </CardContent>
-        </Card>
-        <Card className={warnCount > 0 ? "border-yellow-500/40" : ""}>
-          <CardContent className="p-4 flex items-center gap-3">
-            <AlertTriangle className="h-6 w-6 text-yellow-400 shrink-0" />
-            <div><p className="text-xs text-muted-foreground">Warn</p>
-              <p className="text-2xl font-bold text-yellow-300">{warnCount}</p></div>
-          </CardContent>
-        </Card>
-        <Card className="border-green-500/20">
-          <CardContent className="p-4 flex items-center gap-3">
-            <CheckCircle className="h-6 w-6 text-green-400 shrink-0" />
-            <div><p className="text-xs text-muted-foreground">OK</p>
-              <p className="text-2xl font-bold text-green-300">{okCount}</p></div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-4 flex items-center gap-3">
-            <HelpCircle className="h-6 w-6 text-gray-400 shrink-0" />
-            <div><p className="text-xs text-muted-foreground">Sem dados</p>
-              <p className="text-2xl font-bold">{noDataCount}</p></div>
-          </CardContent>
-        </Card>
+        <StatCard
+          icon={<XCircle className="h-6 w-6 text-red-400 shrink-0" />}
+          label="Alert"
+          value={alertCount}
+          tone="danger"
+          emphasizeBorder={alertCount > 0}
+        />
+        <StatCard
+          icon={<AlertTriangle className="h-6 w-6 text-yellow-400 shrink-0" />}
+          label="Warn"
+          value={warnCount}
+          tone="warning"
+          emphasizeBorder={warnCount > 0}
+        />
+        <StatCard
+          icon={<CheckCircle className="h-6 w-6 text-green-400 shrink-0" />}
+          label="OK"
+          value={okCount}
+          tone="success"
+          emphasizeBorder
+        />
+        <StatCard
+          icon={<HelpCircle className="h-6 w-6 text-gray-400 shrink-0" />}
+          label="Sem dados"
+          value={noDataCount}
+        />
       </div>
 
       {/* Downtimes info */}

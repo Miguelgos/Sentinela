@@ -13,6 +13,7 @@ import {
 import { eventsApi, pessoaApi, type AuditOverview } from "@/lib/api";
 import { useAnalysisData } from "@/hooks/useAnalysisData";
 import { AnalysisShell } from "@/components/AnalysisShell";
+import { StatCard } from "@/components/analysis/StatCard";
 
 // ─── helpers ─────────────────────────────────────────────────────────────────
 
@@ -125,59 +126,33 @@ function AuditContent({ data, names }: { data: AuditOverview; names: Record<stri
 
       {/* ── Summary cards ── */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Total de eventos 24h</p>
-            <p className="text-2xl font-bold text-blue-300">
-              {totalEvents.toLocaleString("pt-BR")}
-            </p>
-            <p className="text-xs text-muted-foreground">
-              {totals.length} serviço{totals.length !== 1 ? "s" : ""}
-            </p>
-          </CardContent>
-        </Card>
-
-        <Card className={totalUnmasked > 0 ? "border-red-500/30" : ""}>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Acessos a dados desmascarados</p>
-            <p
-              className={`text-2xl font-bold ${
-                totalUnmasked > 0 ? "text-red-300" : "text-green-300"
-              }`}
-            >
-              {totalUnmasked.toLocaleString("pt-BR")}
-            </p>
-            <p className="text-xs text-muted-foreground">Visualização do dado real (LGPD)</p>
-          </CardContent>
-        </Card>
-
-        <Card className={externalIPs.length > 0 ? "border-red-500/40 ring-1 ring-red-500/30" : ""}>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">IPs externos</p>
-            <p
-              className={`text-2xl font-bold ${
-                externalIPs.length > 0 ? "text-red-300" : "text-green-300"
-              }`}
-            >
-              {externalIPs.length}
-            </p>
-            <p className="text-xs text-muted-foreground">detectados</p>
-          </CardContent>
-        </Card>
-
-        <Card className={suspiciousUsers.length > 0 ? "border-yellow-500/30" : ""}>
-          <CardContent className="p-4">
-            <p className="text-xs text-muted-foreground">Usuários suspeitos</p>
-            <p
-              className={`text-2xl font-bold ${
-                suspiciousUsers.length > 0 ? "text-yellow-300" : "text-green-300"
-              }`}
-            >
-              {suspiciousUsers.length}
-            </p>
-            <p className="text-xs text-muted-foreground">alto volume/páginas</p>
-          </CardContent>
-        </Card>
+        <StatCard
+          label="Total de eventos 24h"
+          value={totalEvents.toLocaleString("pt-BR")}
+          sub={`${totals.length} serviço${totals.length !== 1 ? "s" : ""}`}
+          tone="info"
+        />
+        <StatCard
+          label="Acessos a dados desmascarados"
+          value={totalUnmasked.toLocaleString("pt-BR")}
+          sub="Visualização do dado real (LGPD)"
+          tone={totalUnmasked > 0 ? "danger" : "success"}
+          emphasizeBorder={totalUnmasked > 0}
+        />
+        <StatCard
+          label="IPs externos"
+          value={externalIPs.length}
+          sub="detectados"
+          tone={externalIPs.length > 0 ? "danger" : "success"}
+          emphasizeBorder={externalIPs.length > 0}
+        />
+        <StatCard
+          label="Usuários suspeitos"
+          value={suspiciousUsers.length}
+          sub="alto volume/páginas"
+          tone={suspiciousUsers.length > 0 ? "warning" : "success"}
+          emphasizeBorder={suspiciousUsers.length > 0}
+        />
       </div>
 
       {/* ── IPs Externos ── */}
