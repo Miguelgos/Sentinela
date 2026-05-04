@@ -3,26 +3,32 @@ import sql from "mssql";
 let pool: sql.ConnectionPool | null = null;
 
 export async function getMssqlPool(): Promise<sql.ConnectionPool> {
-  if (!pool || !pool.connected) {
-    const config: sql.config = {
-      server:   process.env.MSSQL_SERVER   || "BRSPO1IDB11.ITURAN.SP",
-      database: process.env.MSSQL_DATABASE || "ituranweb",
-      options: {
-        instanceName:           process.env.MSSQL_INSTANCE || "INTEGRA_ESPELHO",
-        trustServerCertificate: true,
-        encrypt: false,
-      },
-      authentication: {
-        type: "default",
-        options: {
-          userName: process.env.MSSQL_USER     || "",
-          password: process.env.MSSQL_PASSWORD || "",
-        },
-      },
-      pool: { max: 10, idleTimeoutMillis: 30_000 },
-    };
-    pool = await new sql.ConnectionPool(config).connect();
+  if (pool?.connected) return pool;
+
+  const connStr = process.env["ConnectionStrings__ITURANWEB"];
+  if (connStr) {
+    pool = await new sql.ConnectionPool(connStr).connect();
+    return pool;
   }
+
+  const config: sql.config = {
+    server:   process.env.MSSQL_SERVER   || "BRSPO1IDB11.ITURAN.SP",
+    database: process.env.MSSQL_DATABASE || "ituranweb",
+    options: {
+      instanceName:           process.env.MSSQL_INSTANCE || "INTEGRA_ESPELHO",
+      trustServerCertificate: true,
+      encrypt: false,
+    },
+    authentication: {
+      type: "default",
+      options: {
+        userName: process.env.MSSQL_USER     || "",
+        password: process.env.MSSQL_PASSWORD || "",
+      },
+    },
+    pool: { max: 10, idleTimeoutMillis: 30_000 },
+  };
+  pool = await new sql.ConnectionPool(config).connect();
   return pool;
 }
 

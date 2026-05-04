@@ -5,7 +5,7 @@
   "scripts": {
     "dev": "vite dev",
     "build": "vite build",
-    "start": "node dist/server/server.js"
+    "start": "node .output/server/index.mjs"
   },
   "dependencies": {
     "@radix-ui/react-alert-dialog": "^1.1.2",
