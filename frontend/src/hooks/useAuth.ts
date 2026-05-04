@@ -27,7 +27,7 @@ export function useAuth() {
       provider: "azure",
       options: {
         scopes: "email profile openid",
-        redirectTo: window.location.origin,
+        redirectTo: window.location.origin + import.meta.env.BASE_URL,
       },
     });
     return error ? { error: { message: error.message } } : { error: null };
