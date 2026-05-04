@@ -32,11 +32,17 @@ export function seqHttpGet(path: string): Promise<SeqApiEvent[]> {
   });
 }
 
-export async function fetchSeq(opts: {
+export interface FetchSeqOpts {
   fromDate?: Date;
-  maxTotal?: number;
+  toDate?: Date;
+  signal?: string;
   filter?: string;
-}): Promise<ParsedEvent[]> {
+  maxTotal?: number;
+  predicate?: (e: ParsedEvent) => boolean;
+  stopAtId?: string;
+}
+
+export async function fetchSeq(opts: FetchSeqOpts = {}): Promise<ParsedEvent[]> {
   const PAGE = 1000;
   const MAX = opts.maxTotal ?? 1000;
   const results: ParsedEvent[] = [];
@@ -44,19 +50,24 @@ export async function fetchSeq(opts: {
 
   while (results.length < MAX) {
     let qs = `?count=${PAGE}&render=true`;
+    if (opts.signal)   qs += `&signal=${encodeURIComponent(opts.signal)}`;
     if (opts.filter)   qs += `&filter=${encodeURIComponent(opts.filter)}`;
     if (opts.fromDate) qs += `&fromDateUtc=${encodeURIComponent(opts.fromDate.toISOString())}`;
+    if (opts.toDate)   qs += `&toDateUtc=${encodeURIComponent(opts.toDate.toISOString())}`;
     if (afterId)       qs += `&afterId=${encodeURIComponent(afterId)}`;
 
     const raw = await seqHttpGet(`/api/events/${qs}`);
     if (raw.length === 0) break;
 
-    let done = false;
+    let stopped = false;
     for (const e of raw) {
-      if (opts.fromDate && new Date(e.Timestamp) < opts.fromDate) { done = true; break; }
-      results.push(parseSeqApiEvent(e));
+      if (opts.stopAtId && e.Id === opts.stopAtId) { stopped = true; break; }
+      if (opts.fromDate && new Date(e.Timestamp) < opts.fromDate) { stopped = true; break; }
+      const p = parseSeqApiEvent(e);
+      if (!opts.predicate || opts.predicate(p)) results.push(p);
     }
-    if (done || raw.length < PAGE) break;
+
+    if (stopped || raw.length < PAGE) break;
     afterId = raw[raw.length - 1]?.Id;
     if (!afterId) break;
   }
@@ -72,4 +83,12 @@ export function prop(e: ParsedEvent, name: string): string | null {
 
 export function truncHour(ts: string): string {
   return ts.slice(0, 13) + ":00:00.000Z";
+}
+
+export function emailFrom(msg: string): string | null {
+  return msg?.match(/User:\s*(\S+)\s*\|/)?.[1] ?? null;
+}
+
+export function clientFrom(msg: string): string | null {
+  return msg?.match(/ClientId:\s*(\S+)[\s|]/)?.[1] ?? null;
 }

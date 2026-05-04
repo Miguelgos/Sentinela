@@ -1,17 +1,19 @@
 import sql from "mssql";
 
-let pool: sql.ConnectionPool | null = null;
+// Cacheamos a Promise (não o pool resolvido) pra evitar race em cold start:
+// duas chamadas concorrentes vão aguardar o mesmo connect() em vez de criar
+// dois pools.
+let poolPromise: Promise<sql.ConnectionPool> | null = null;
 
 export async function getMssqlPool(): Promise<sql.ConnectionPool> {
-  if (pool?.connected) return pool;
-
-  const connStr = process.env["ConnectionStrings__ITURANWEB"];
-  if (connStr) {
-    pool = await new sql.ConnectionPool(connStr).connect();
-    return pool;
+  if (poolPromise) {
+    const p = await poolPromise;
+    if (p.connected) return p;
+    poolPromise = null;
   }
 
-  const config: sql.config = {
+  const connStr = process.env["ConnectionStrings__ITURANWEB"];
+  const config: sql.config | string = connStr ?? {
     server:   process.env.MSSQL_SERVER   || "BRSPO1IDB11.ITURAN.SP",
     database: process.env.MSSQL_DATABASE || "ituranweb",
     options: {
@@ -28,8 +30,8 @@ export async function getMssqlPool(): Promise<sql.ConnectionPool> {
     },
     pool: { max: 10, idleTimeoutMillis: 30_000 },
   };
-  pool = await new sql.ConnectionPool(config).connect();
-  return pool;
+  poolPromise = new sql.ConnectionPool(config).connect();
+  return poolPromise;
 }
 
 export async function lookupPessoas(
@@ -43,7 +45,6 @@ export async function lookupPessoas(
   const pool = await getMssqlPool();
   const req = pool.request();
 
-  // Passa os IDs via table-valued param simples com IN (...)
   const placeholders = unique.map((id, i) => {
     req.input(`id${i}`, sql.Int, id);
     return `@id${i}`;

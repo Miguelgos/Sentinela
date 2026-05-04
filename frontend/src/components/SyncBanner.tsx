@@ -5,7 +5,10 @@ export function SyncBanner() {
   const { data } = useQuery({
     queryKey: ["events-status"],
     queryFn: () => getEventsStatus(),
-    refetchInterval: 5_000,
+    // Só faz polling enquanto o sync inicial está rodando. Quando vira "done"
+    // o polling para e o banner some — evita 1 RPC/5s/aba 24/7.
+    refetchInterval: (q) =>
+      q.state.data?.progress?.phase === "syncing" ? 5_000 : false,
   });
 
   const progress = data?.progress;

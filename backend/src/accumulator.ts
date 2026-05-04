@@ -1,21 +1,15 @@
-import { seqHttpGet } from "./seq";
-import { SeqApiEvent, parseSeqApiEvent } from "./types";
+import { fetchSeq, ParsedEvent } from "./seq";
+import { SeqApiEvent } from "./types";
 
-export type ParsedEvent = ReturnType<typeof parseSeqApiEvent>;
-
-// O store mantém apenas o subset de raw_data que efetivamente é lido pelos
-// consumidores (Properties via prop()), descartando MessageTemplateTokens,
-// Links, EventType, Exception bruta etc. Reduz ~19KB → ~4KB por evento e
-// permite 100k em store dentro do limit 768Mi do pod.
+// Store mantém apenas o subset de raw_data lido pelos consumidores (Properties
+// via prop()), descartando MessageTemplateTokens, Links, EventType e Exception.
+// Reduz ~19KB → ~4KB por evento e permite 100k em store dentro do limit 768Mi.
 type CompactRaw = { Properties: SeqApiEvent["Properties"] };
 export type StoredEvent = Omit<ParsedEvent, "raw_data"> & { raw_data: CompactRaw };
 
 function compactEvent(p: ParsedEvent): StoredEvent {
   const raw = p.raw_data as SeqApiEvent;
-  return {
-    ...p,
-    raw_data: { Properties: raw.Properties ?? [] },
-  };
+  return { ...p, raw_data: { Properties: raw.Properties ?? [] } };
 }
 
 const LEVEL_FILTER = "@Level in ['Warning', 'Error', 'Fatal']";
@@ -38,16 +32,16 @@ export function shouldStore(e: ParsedEvent): boolean {
 
 const RETENTION_DAYS = 7;
 const RETENTION_MS = RETENTION_DAYS * 86_400_000;
-
-// Com store compacto (~4KB/evento), 100k cabem em ~400MB — bem dentro do
-// limit 768Mi. Volume atual: ~65k eventos/7d, então 100k dá margem ~50%
-// para crescimento.
 const MAX_EVENTS = 100_000;
 
 const _store = new Map<string, StoredEvent>();
 let _latestSeqId: string | undefined;
 let _oldestTs: string | undefined;
 let _newestTs: string | undefined;
+
+// Cache do array sorted retornado por getEvents(). Invalidado em qualquer
+// mutação do store. Sem cache, cada handler HTTP paga O(n log n) com n=100k.
+let _sortedCache: StoredEvent[] | null = null;
 
 export type SyncPhase = "idle" | "syncing" | "done" | "error";
 const _syncProgress: {
@@ -69,8 +63,15 @@ const _syncProgress: {
 };
 
 export function getEvents(): StoredEvent[] {
-  return [..._store.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  if (_sortedCache) return _sortedCache;
+  _sortedCache = [..._store.values()].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
+  return _sortedCache;
 }
+
+export function getEventById(id: string): StoredEvent | undefined {
+  return _store.get(id);
+}
+
 export function isReady(): boolean { return _syncProgress.phase === "done"; }
 export function storeSize(): number { return _store.size; }
 export function storeCoverage() {
@@ -81,34 +82,37 @@ export function getSyncProgress() {
 }
 
 function addToStore(events: ParsedEvent[]): void {
+  if (events.length === 0) return;
   for (const p of events) {
     if (!p.event_id) continue;
     _store.set(p.event_id, compactEvent(p));
     if (!_newestTs || p.timestamp > _newestTs) _newestTs = p.timestamp;
     if (!_oldestTs || p.timestamp < _oldestTs) _oldestTs = p.timestamp;
   }
+  _sortedCache = null;
 }
 
-// Drop events older than RETENTION_MS and recompute _oldestTs
 function applyMapRetention(): void {
   const cutoff = new Date(Date.now() - RETENTION_MS).toISOString();
+  if (_oldestTs && _oldestTs >= cutoff) return;
+
   let removed = 0;
+  let nextOldest: string | undefined;
   for (const [id, e] of _store) {
     if (e.timestamp < cutoff) {
       _store.delete(id);
       removed++;
+    } else if (!nextOldest || e.timestamp < nextOldest) {
+      nextOldest = e.timestamp;
     }
   }
   if (removed > 0) {
-    _oldestTs = undefined;
-    for (const e of _store.values()) {
-      if (!_oldestTs || e.timestamp < _oldestTs) _oldestTs = e.timestamp;
-    }
+    _oldestTs = nextOldest;
+    _sortedCache = null;
     console.log(`[accumulator] retenção: -${removed} eventos > ${RETENTION_DAYS}d (store: ${_store.size})`);
   }
 }
 
-// Hard cap: drop oldest until size <= MAX_EVENTS
 function applyMaxEventsCap(): void {
   if (_store.size <= MAX_EVENTS) return;
   const entries = [..._store.entries()].sort((a, b) =>
@@ -117,71 +121,53 @@ function applyMaxEventsCap(): void {
   const toRemove = entries.length - MAX_EVENTS;
   for (let i = 0; i < toRemove; i++) _store.delete(entries[i][0]);
   _oldestTs = entries[toRemove]?.[1].timestamp;
+  _sortedCache = null;
   console.log(`[accumulator] cap: -${toRemove} eventos (store: ${_store.size}, max: ${MAX_EVENTS})`);
 }
 
-// Fetch a window from Seq with from+to, paginated by afterId
-async function fetchSeqRange(from: Date, to: Date, maxEvents = 50_000): Promise<ParsedEvent[]> {
-  const PAGE = 1000;
-  const SEQ_SIGNAL = process.env.SEQ_SIGNAL || "";
-  const results: ParsedEvent[] = [];
-  let afterId: string | undefined;
-
-  while (results.length < maxEvents) {
-    let qs = `?count=${PAGE}&render=true`;
-    if (SEQ_SIGNAL) qs += `&signal=${encodeURIComponent(SEQ_SIGNAL)}`;
-    qs += `&filter=${encodeURIComponent(LEVEL_FILTER)}`;
-    qs += `&fromDateUtc=${encodeURIComponent(from.toISOString())}`;
-    qs += `&toDateUtc=${encodeURIComponent(to.toISOString())}`;
-    if (afterId) qs += `&afterId=${encodeURIComponent(afterId)}`;
-
-    const raw: SeqApiEvent[] = await seqHttpGet(`/api/events/${qs}`);
-    if (raw.length === 0) break;
-
-    for (const e of raw) {
-      const p = parseSeqApiEvent(e);
-      if (shouldStore(p)) results.push(p);
-    }
-
-    if (raw.length < PAGE) break;
-    afterId = raw[raw.length - 1]?.Id;
-    if (!afterId) break;
-  }
-
-  return results;
-}
-
-// Poll a cada 60s: busca só o que é mais novo que _latestSeqId
 async function refresh(): Promise<void> {
-  const PAGE = 500;
-  const SEQ_SIGNAL = process.env.SEQ_SIGNAL || "";
-  let qs = `?count=${PAGE}&render=true`;
-  if (SEQ_SIGNAL) qs += `&signal=${encodeURIComponent(SEQ_SIGNAL)}`;
-  qs += `&filter=${encodeURIComponent(LEVEL_FILTER)}`;
+  const raw = await fetchSeq({
+    signal: process.env.SEQ_SIGNAL,
+    filter: LEVEL_FILTER,
+    maxTotal: 500,
+    predicate: shouldStore,
+    stopAtId: _latestSeqId,
+  });
 
-  const raw: SeqApiEvent[] = await seqHttpGet(`/api/events/${qs}`);
   if (raw.length === 0) return;
 
-  const batch: ParsedEvent[] = [];
-  for (const e of raw) {
-    if (_latestSeqId && e.Id === _latestSeqId) break;
-    const p = parseSeqApiEvent(e);
-    if (shouldStore(p)) batch.push(p);
-  }
+  addToStore(raw);
+  console.log(`[accumulator] +${raw.length} novos (store: ${_store.size})`);
 
-  if (batch.length > 0) {
-    addToStore(batch);
-    console.log(`[accumulator] +${batch.length} novos (store: ${_store.size})`);
-  }
-
-  if (raw[0]?.Id) _latestSeqId = raw[0].Id;
+  // raw vem em ordem desc (mais recente primeiro), mantido pelo Seq
+  if (raw[0]?.event_id) _latestSeqId = raw[0].event_id;
 
   applyMapRetention();
   applyMaxEventsCap();
 }
 
-// Sync 7 dias em chunks de 1 dia (do mais recente pro mais antigo).
-// Atualiza _syncProgress a cada chunk pra dar feedback ao frontend.
+async function syncDay(d: number): Promise<ParsedEvent[]> {
+  const to = new Date(Date.now() - (d - 1) * 86_400_000);
+  const from = new Date(Date.now() - d * 86_400_000);
+  try {
+    const events = await fetchSeq({
+      signal: process.env.SEQ_SIGNAL,
+      filter: LEVEL_FILTER,
+      fromDate: from,
+      toDate: to,
+      maxTotal: 50_000,
+      predicate: shouldStore,
+    });
+    console.log(`[accumulator] dia ${d}/${RETENTION_DAYS}: +${events.length} eventos`);
+    return events;
+  } catch (err) {
+    console.error(`[accumulator] erro no dia ${d}:`, err);
+    return [];
+  } finally {
+    _syncProgress.daysDone++;
+  }
+}
+
 async function syncFullHistory(): Promise<void> {
   _syncProgress.phase = "syncing";
   _syncProgress.startedAt = new Date().toISOString();
@@ -189,38 +175,29 @@ async function syncFullHistory(): Promise<void> {
   _syncProgress.loaded = 0;
   _syncProgress.error = null;
 
-  console.log(`[accumulator] sync inicial: ${RETENTION_DAYS} dias em chunks de 1 dia`);
+  console.log(`[accumulator] sync inicial: ${RETENTION_DAYS} dias em paralelo`);
 
-  for (let d = 1; d <= RETENTION_DAYS; d++) {
-    const to = new Date(Date.now() - (d - 1) * 86_400_000);
-    const from = new Date(Date.now() - d * 86_400_000);
-    try {
-      const events = await fetchSeqRange(from, to);
-      if (events.length > 0) {
-        addToStore(events);
-        _syncProgress.loaded += events.length;
-      }
-      // Lembra o ID mais recente já visto pra base do refresh()
-      if (d === 1 && events.length > 0 && !_latestSeqId) {
-        // events vêm em ordem desc (mais recente primeiro); pega o mais novo
-        const newest = events.reduce((a, b) => (a.timestamp > b.timestamp ? a : b));
-        _latestSeqId = newest.event_id ?? undefined;
-      }
-      console.log(`[accumulator] dia ${d}/${RETENTION_DAYS}: +${events.length} eventos (store: ${_store.size})`);
-    } catch (err) {
-      console.error(`[accumulator] erro no dia ${d}:`, err);
-    }
-    _syncProgress.daysDone = d;
-    applyMaxEventsCap();
+  // Dias são independentes — paralelizar reduz cold-start ~7x. Limite de
+  // concorrência implícito é o agente HTTP do Node (não há pool externo).
+  const days = Array.from({ length: RETENTION_DAYS }, (_, i) => i + 1);
+  const results = await Promise.all(days.map(syncDay));
+
+  for (const events of results) addToStore(events);
+  _syncProgress.loaded = results.reduce((s, ev) => s + ev.length, 0);
+
+  // raw[0] do dia 1 é o evento mais recente (Seq retorna em ordem desc)
+  if (!_latestSeqId && results[0]?.[0]?.event_id) {
+    _latestSeqId = results[0][0].event_id;
   }
 
+  applyMaxEventsCap();
   _syncProgress.phase = "done";
   _syncProgress.finishedAt = new Date().toISOString();
   console.log(`[accumulator] sync completo: ${_syncProgress.loaded} eventos | store: ${_store.size}`);
 }
 
-// Boot não-bloqueante: HTTP server e refresh sobem imediatamente,
-// sync de 7d roda em background. async pra compat com chamadores existentes.
+// Boot não-bloqueante: HTTP server e refresh sobem imediatamente, sync de 7d
+// roda em background. async pra compat com chamadores existentes.
 export async function initAccumulator(): Promise<void> {
   setInterval(() => {
     refresh().catch((err) => console.error("[accumulator] erro no refresh:", err));

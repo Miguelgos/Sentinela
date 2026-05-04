@@ -15,11 +15,6 @@ interface RouterContext {
   queryClient: QueryClient;
 }
 
-export interface RuntimeEnv {
-  VITE_SUPABASE_URL: string;
-  VITE_SUPABASE_ANON_KEY: string;
-}
-
 const getRuntimeEnv = createServerFn({ method: "GET" }).handler(
   (): RuntimeEnv => ({
     VITE_SUPABASE_URL: process.env.VITE_SUPABASE_URL ?? "",
@@ -27,8 +22,16 @@ const getRuntimeEnv = createServerFn({ method: "GET" }).handler(
   }),
 );
 
+// JSON.stringify pode produzir "</script>" se algum valor contiver "</",
+// permitindo escape do bloco. Substituir "<" por "<" mantém o JSON
+// válido e neutraliza o vetor de XSS no SSR.
+function safeJson(value: unknown): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
+
 export const Route = createRootRouteWithContext<RouterContext>()({
   loader: () => getRuntimeEnv(),
+  staleTime: Infinity,
   head: () => ({
     meta: [
       { charSet: "utf-8" },
@@ -64,7 +67,7 @@ function RootDocument({
         <HeadContent />
         <script
           dangerouslySetInnerHTML={{
-            __html: `window.__ENV__ = ${JSON.stringify(env)};`,
+            __html: `window.__ENV__ = ${safeJson(env)};`,
           }}
         />
       </head>
