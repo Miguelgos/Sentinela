@@ -4,6 +4,7 @@ import { gcFetch } from "./lib/gcClient";
 import { ddFetch } from "./lib/ddClient";
 import { grafanaPromQuery, grafanaFiringAlerts } from "./lib/grafanaClient";
 import { lokiQueryRange, type LokiStream } from "./lib/lokiClient";
+import { correlateProblems, detectors as anomalyDetectors, MS_PER_MINUTE, type AnomalyProblem } from "./anomaly";
 
 export type RiskLevel = "CRITICAL" | "HIGH" | "MEDIUM" | "LOW" | "INFO";
 
@@ -90,6 +91,7 @@ export interface ThreatContext {
   criticalAlerts: Awaited<ReturnType<typeof grafanaFiringAlerts>>;
   downDeps: string[];
   breachedSlos: SloEntry[];
+  anomalyProblems: AnomalyProblem[];
   sources: { seqOk: boolean; ddOk: boolean; gcOk: boolean };
 }
 
@@ -254,6 +256,10 @@ export async function fetchThreatContext(): Promise<ThreatContext> {
     return typeof rem === "number" && rem < 0.1;
   });
 
+  const nowMin = Math.floor(Date.now() / MS_PER_MINUTE);
+  const anomalies = anomalyDetectors.flatMap(detect => detect(seqEvents, nowMin));
+  const anomalyProblems = correlateProblems(anomalies);
+
   return {
     seqEvents, authFails,
     monitors, alertMonitors, activeIncidents,
@@ -264,6 +270,7 @@ export async function fetchThreatContext(): Promise<ThreatContext> {
     auditSummaries, auditTotal, auditUnmasked, auditExternalIPs,
     firingAlerts, criticalAlerts, downDeps,
     breachedSlos,
+    anomalyProblems,
     sources: { seqOk, ddOk, gcOk },
   };
 }
@@ -519,11 +526,26 @@ const ruleSloBreach: Rule = (ctx) => {
   };
 };
 
+const ruleCriticalAnomaly: Rule = (ctx) => {
+  const critical = ctx.anomalyProblems.filter(p => p.severity === "CRITICAL" || p.severity === "HIGH");
+  if (critical.length === 0) return null;
+  const top = critical.slice(0, 5);
+  return {
+    rule: "ANOMALY_DETECTED",
+    title: "Anomalias Detectadas (Davis-style)",
+    description: `${critical.length} problema(s) detectado(s) por análise estatística (P99+IQR sobre 7d): ${critical.filter(p => p.severity === "CRITICAL").length} crítico(s), ${critical.filter(p => p.severity === "HIGH").length} alto(s).`,
+    risk: critical.some(p => p.severity === "CRITICAL") ? "CRITICAL" : "HIGH",
+    evidence: top.map(p => `[${p.severity}] ${p.rootDimension}: ${p.anomalies[0]?.evidence[0] ?? "—"}`),
+    indicators: top.map(p => p.rootDimension),
+  };
+};
+
 export const rules: Rule[] = [
   ruleBruteForce, ruleWafInjection, ruleMultiSourceIp, ruleDatadogAlert,
   ruleHighErrorRate, ruleActiveIncident, ruleScannerDetected, ruleBotAttack,
   ruleInfraStress, ruleGeoConcentration, rulePrometheusAlert, ruleDeploymentDown,
   ruleAuditAnomaly, ruleExternalAuditIp, ruleSloBreach,
+  ruleCriticalAnomaly,
 ];
 
 export function buildPrompt(

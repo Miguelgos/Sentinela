@@ -15,6 +15,7 @@ import {
 } from "../../../app/server/fn/datadog";
 import { getGocacheOverview } from "../../../app/server/fn/gocache";
 import { getThreatReport } from "../../../app/server/fn/report";
+import { getAnomalyReport } from "../../../app/server/fn/anomaly";
 import { getGrafanaKubernetes } from "../../../app/server/fn/grafana";
 import { getAuditOverview } from "../../../app/server/fn/audit";
 
@@ -262,6 +263,54 @@ export interface ThreatReport {
   };
 }
 
+export type AnomalySeverity = "CRITICAL" | "HIGH" | "MEDIUM";
+export type AnomalyDetectorId =
+  | "ERROR_RATE_SERVICE"
+  | "ERROR_RATE_ENDPOINT"
+  | "AUTH_BURST"
+  | "NEW_MESSAGE"
+  | "OFF_HOURS";
+
+export interface AnomalyEvent {
+  detector: AnomalyDetectorId;
+  dimension: string;
+  metric: number;
+  baseline: number;
+  threshold: number;
+  violationsInWindow: number;
+  windowSize: number;
+  severity: AnomalySeverity;
+  detectedAt: string;
+  evidence: string[];
+}
+
+export interface AnomalyProblem {
+  id: string;
+  rootDimension: string;
+  severity: AnomalySeverity;
+  anomalies: AnomalyEvent[];
+  narrative?: string;
+}
+
+export interface AnomalyTimeline {
+  dimension: string;
+  detector: AnomalyDetectorId;
+  baseline: number;
+  threshold: number;
+  points: { minute: number; metric: number }[];
+}
+
+export interface AnomalyReport {
+  generatedAt: string;
+  ready: boolean;
+  coverage: { oldest: string | undefined; newest: string | undefined };
+  totalEvents: number;
+  problems: AnomalyProblem[];
+  anomalies: AnomalyEvent[];
+  timelines: AnomalyTimeline[];
+  narrativeError?: string;
+}
+
 // ── API objects ───────────────────────────────────────────────────────────────
 
 export const eventsApi = {
@@ -283,6 +332,10 @@ export const reportApi = {
   threatReport: () => getThreatReport(),
 };
 
+export const anomalyApi = {
+  report: () => getAnomalyReport(),
+};
+
 export const pessoaApi = {
   lookup: (userIds: string[]): Promise<Record<string, string>> =>
     lookupPessoa({ data: { userIds: userIds.join(",") } }),
@@ -290,6 +343,7 @@ export const pessoaApi = {
 
 export const queryKeys = {
   threatReport:    ["threatReport"],
+  anomalyReport:   ["anomalyReport"],
   auditOverview:   ["auditOverview"],
   grafanaK8s:      ["grafanaKubernetes"],
   datadogOverview: ["datadogOverview"],

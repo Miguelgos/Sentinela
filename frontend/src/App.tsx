@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { LayoutDashboard, List, ShieldAlert, Globe, BarChart2, Flame, FileWarning, Layers, Eye, LogOut } from "lucide-react";
+import { LayoutDashboard, List, ShieldAlert, Globe, BarChart2, Flame, FileWarning, Activity, Layers, Eye, LogOut } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { Dashboard } from "@/components/Dashboard";
@@ -11,11 +11,12 @@ import { GoCacheAnalysis } from "@/components/GoCacheAnalysis";
 import { ReportAnalysis } from "@/components/ReportAnalysis";
 import { KubernetesAnalysis } from "@/components/KubernetesAnalysis";
 import { AuditAnalysis } from "@/components/AuditAnalysis";
+import { AnomalyAnalysis } from "@/components/AnomalyAnalysis";
 import { SentinelaLogo } from "@/components/SentinelaLogo";
 import { LoginPage } from "@/components/LoginPage";
 import { useAuth } from "@/hooks/useAuth";
 
-type Page = "dashboard" | "logs" | "auth-errors" | "kong-auth" | "datadog" | "gocache" | "report" | "kubernetes" | "audit";
+type Page = "dashboard" | "logs" | "auth-errors" | "kong-auth" | "datadog" | "gocache" | "report" | "anomaly" | "kubernetes" | "audit";
 
 const NAV = [
   { id: "dashboard"   as Page, label: "Dashboard",              icon: LayoutDashboard },
@@ -25,6 +26,7 @@ const NAV = [
   { id: "datadog"     as Page, label: "Datadog",                icon: BarChart2 },
   { id: "gocache"      as Page, label: "GoCache WAF",            icon: Flame },
   { id: "report"       as Page, label: "Relatório de Ameaças",   icon: FileWarning },
+  { id: "anomaly"      as Page, label: "Anomalias",               icon: Activity },
   { id: "kubernetes"   as Page, label: "Kubernetes",             icon: Layers },
   { id: "audit"        as Page, label: "Auditoria",              icon: Eye },
 ];
@@ -41,6 +43,7 @@ export default function App() {
     datadog:      "Datadog — Infraestrutura & Monitores",
     gocache:      "GoCache WAF — Proteção & Ataques",
     report:       "Relatório de Ameaças Cibernéticas",
+    anomaly:      "Detecção de Anomalias (Davis-style)",
     kubernetes:   "Kubernetes — Saúde do Cluster",
     audit:        "Auditoria — Logs de Acesso",
   };
@@ -108,6 +111,7 @@ export default function App() {
           {page === "datadog"     && <DatadogAnalysis />}
           {page === "gocache"      && <GoCacheAnalysis />}
           {page === "report"       && <ReportAnalysis />}
+          {page === "anomaly"      && <AnomalyAnalysis />}
           {page === "kubernetes"   && <KubernetesAnalysis />}
           {page === "audit"        && <AuditAnalysis />}
         </div>
