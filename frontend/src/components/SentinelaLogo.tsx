@@ -1,7 +1,7 @@
 export function SentinelaLogo({ className }: { className?: string }) {
   return (
     <img
-      src="/sentinela_v1_radar_pulso.svg"
+      src={`${import.meta.env.BASE_URL}sentinela_v1_radar_pulso.svg`}
       alt="Sentinela"
       className={className}
       draggable={false}
