@@ -23,6 +23,13 @@ const DETECTOR_LABEL: Record<string, string> = {
   AUTH_BURST:          "Burst de auth fail",
   NEW_MESSAGE:         "Mensagem inédita",
   OFF_HOURS:           "Atividade off-hours",
+  WAF_BURST:           "Pico WAF",
+  NEW_ATTACK_ORIGIN:   "Origem de ataque nova",
+  AUDIT_OFF_HOURS:     "Auditoria off-hours",
+  NEW_AUDIT_USER:      "Usuário audit novo",
+  EXTERNAL_IP_AUDIT_SPIKE: "IP externo na audit",
+  POD_RESTART_SPIKE:   "Restart de deployment",
+  INFRA_OFF_HOURS:     "Infra off-hours",
 };
 
 function SeverityBadge({ level }: { level: AnomalySeverity }) {

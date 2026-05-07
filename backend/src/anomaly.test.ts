@@ -1,7 +1,13 @@
 import { describe, it, expect } from "vitest";
-import type { StoredEvent } from "./accumulator";
+import {
+  dimensionsForEvent,
+  type StoredEvent,
+} from "./accumulators/seqAccumulator";
+import { BucketStore, tsToMinute } from "./timeseries/bucketStore";
+import { EventStore } from "./timeseries/eventStore";
 import {
   buildTimeSeries,
+  clusterKey,
   computeBaseline,
   computeSeasonalBaseline,
   correlateProblems,
@@ -18,12 +24,15 @@ import {
   MS_PER_MINUTE,
   REFERENCE_WINDOW_MIN,
   type AnomalyEvent,
+  type DetectorContext,
   type TimeSeries,
 } from "./anomaly";
 
+let _id = 0;
+
 function ev(overrides: Partial<StoredEvent>): StoredEvent {
   return {
-    event_id: "id",
+    event_id: `id-${++_id}`,
     timestamp: new Date(0).toISOString(),
     message: "",
     level: "Error",
@@ -41,6 +50,27 @@ function ev(overrides: Partial<StoredEvent>): StoredEvent {
 
 function tsAt(min: number): string {
   return new Date(min * MS_PER_MINUTE).toISOString();
+}
+
+const SEQ = "seq";
+
+// Constrói DetectorContext a partir de um array de eventos sintéticos —
+// replica o mapeamento de dimensões do seqAccumulator. historicalClusters
+// é populado com clusters de eventos > 60 min antes de nowMin (padrão real).
+function ctxFromEvents(events: StoredEvent[], nowMin: number): DetectorContext {
+  const bucketStore = new BucketStore();
+  const eventStore = new EventStore<StoredEvent>();
+  const historicalClusters = new Set<string>();
+
+  const cutoffNew = nowMin - 60;
+  for (const e of events) {
+    const minute = tsToMinute(e.timestamp);
+    bucketStore.bumpMany(SEQ, minute, dimensionsForEvent(e));
+    if (e.event_id) eventStore.put(SEQ, e.event_id, e, minute);
+    const cluster = clusterKey(e.message);
+    if (cluster && minute < cutoffNew) historicalClusters.add(cluster);
+  }
+  return { bucketStore, eventStore, historicalClusters, nowMin, source: SEQ };
 }
 
 describe("percentile", () => {
@@ -394,7 +424,7 @@ describe("detectOffHoursVolume", () => {
     const events = Array.from({ length: 10 }, (_, i) =>
       ev({ timestamp: tsAt(nowMin - i), service: "x", level: "Error" }),
     );
-    expect(detectOffHoursVolume(events, nowMin)).toEqual([]);
+    expect(detectOffHoursVolume(ctxFromEvents(events, nowMin))).toEqual([]);
   });
 });
 
@@ -418,7 +448,7 @@ describe("detectErrorRatePerService", () => {
       events.push(ev({ timestamp: tsAt(m), service: "spiky", level: "Error" }));
     }
 
-    const result = detectErrorRatePerService(events, nowMin);
+    const result = detectErrorRatePerService(ctxFromEvents(events, nowMin));
     const spiky = result.find(a => a.dimension === "service:spiky");
     expect(spiky).toBeDefined();
     expect(spiky?.metric).toBe(50);
@@ -430,7 +460,7 @@ describe("detectErrorRatePerService", () => {
     for (let m = nowMin - 4; m <= nowMin; m++) {
       events.push(ev({ timestamp: tsAt(m), service: "x", level: "Warning" }));
     }
-    const result = detectErrorRatePerService(events, nowMin);
+    const result = detectErrorRatePerService(ctxFromEvents(events, nowMin));
     expect(result).toEqual([]);
   });
 });
@@ -450,7 +480,7 @@ describe("detectErrorRatePerEndpoint", () => {
         events.push(ev({ timestamp: tsAt(m), request_path: "/a", level: "Error" }));
       }
     }
-    const result = detectErrorRatePerEndpoint(events, nowMin);
+    const result = detectErrorRatePerEndpoint(ctxFromEvents(events, nowMin));
     const a = result.find(r => r.dimension === "endpoint:/a");
     expect(a).toBeDefined();
   });
@@ -462,7 +492,7 @@ describe("detectErrorRatePerEndpoint", () => {
     for (let m = nowMin - 4; m <= nowMin; m++) {
       events.push(ev({ timestamp: tsAt(m), request_path: "/raro", level: "Error" }));
     }
-    const result = detectErrorRatePerEndpoint(events, nowMin);
+    const result = detectErrorRatePerEndpoint(ctxFromEvents(events, nowMin));
     expect(result).toEqual([]);
   });
 
@@ -477,7 +507,7 @@ describe("detectErrorRatePerEndpoint", () => {
         events.push(ev({ timestamp: tsAt(m), request_path: `/x?id=${i}`, level: "Error" }));
       }
     }
-    const result = detectErrorRatePerEndpoint(events, nowMin);
+    const result = detectErrorRatePerEndpoint(ctxFromEvents(events, nowMin));
     expect(result.find(r => r.dimension === "endpoint:/x")).toBeDefined();
   });
 });
@@ -498,7 +528,7 @@ describe("detectAuthBurst", () => {
       }
     }
 
-    const result = detectAuthBurst(events, nowMin);
+    const result = detectAuthBurst(ctxFromEvents(events, nowMin));
     expect(result).toHaveLength(1);
     expect(result[0].dimension).toBe("auth_failures");
   });
@@ -509,7 +539,7 @@ describe("detectAuthBurst", () => {
     for (let m = nowMin - 4; m <= nowMin; m++) {
       events.push(ev({ timestamp: tsAt(m), message: "Database error" }));
     }
-    expect(detectAuthBurst(events, nowMin)).toEqual([]);
+    expect(detectAuthBurst(ctxFromEvents(events, nowMin))).toEqual([]);
   });
 });
 
@@ -527,7 +557,7 @@ describe("detectNewMessage", () => {
       events.push(ev({ timestamp: tsAt(nowMin - i), message: "NullReferenceException at FooService", level: "Error" }));
     }
 
-    const result = detectNewMessage(events, nowMin);
+    const result = detectNewMessage(ctxFromEvents(events, nowMin));
     expect(result).toHaveLength(1);
     expect(result[0].metric).toBe(5);
     expect(result[0].dimension).toContain("message:");
@@ -537,7 +567,7 @@ describe("detectNewMessage", () => {
     const events: StoredEvent[] = [];
     const nowMin = REFERENCE_WINDOW_MIN + 100;
     events.push(ev({ timestamp: tsAt(nowMin - 1), message: "Mensagem nova rara", level: "Error" }));
-    expect(detectNewMessage(events, nowMin)).toEqual([]);
+    expect(detectNewMessage(ctxFromEvents(events, nowMin))).toEqual([]);
   });
 
   it("ignora mensagem se já existia no histórico", () => {
@@ -551,7 +581,7 @@ describe("detectNewMessage", () => {
     for (let i = 0; i < 5; i++) {
       events.push(ev({ timestamp: tsAt(nowMin - i), message: "Mensagem comum", level: "Error" }));
     }
-    expect(detectNewMessage(events, nowMin)).toEqual([]);
+    expect(detectNewMessage(ctxFromEvents(events, nowMin))).toEqual([]);
   });
 
   it("normaliza dígitos no clusterKey (não vê IDs como mensagens distintas)", () => {
@@ -563,6 +593,6 @@ describe("detectNewMessage", () => {
     for (let i = 0; i < 5; i++) {
       events.push(ev({ timestamp: tsAt(nowMin - i), message: "User 99999 not found", level: "Error" }));
     }
-    expect(detectNewMessage(events, nowMin)).toEqual([]);
+    expect(detectNewMessage(ctxFromEvents(events, nowMin))).toEqual([]);
   });
 });

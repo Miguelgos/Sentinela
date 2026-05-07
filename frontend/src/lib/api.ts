@@ -75,6 +75,7 @@ export interface KongAuthStats {
     failures500: number;
     failurePct: number;
   };
+  period?: number;
   timeline: { hora: string; falhas: number; sucessos: number }[];
   topUsers: { username: string; falhas: string; first_seen: string; last_seen: string }[];
   topIPs: { client_ip: string; falhas: string; usuarios_unicos: string; first_seen: string; last_seen: string }[];
@@ -86,6 +87,7 @@ export interface KongAuthStats {
 
 export interface AuthErrorStats {
   total: number;
+  period?: number;
   timeline: { hour: string; count: string; unique_users: string }[];
   topUsers: { email: string; count: string; last_seen: string }[];
   topClients: { client_id: string; count: string }[];
@@ -269,7 +271,14 @@ export type AnomalyDetectorId =
   | "ERROR_RATE_ENDPOINT"
   | "AUTH_BURST"
   | "NEW_MESSAGE"
-  | "OFF_HOURS";
+  | "OFF_HOURS"
+  | "WAF_BURST"
+  | "NEW_ATTACK_ORIGIN"
+  | "AUDIT_OFF_HOURS"
+  | "NEW_AUDIT_USER"
+  | "EXTERNAL_IP_AUDIT_SPIKE"
+  | "POD_RESTART_SPIKE"
+  | "INFRA_OFF_HOURS";
 
 export interface AnomalyEvent {
   detector: AnomalyDetectorId;
@@ -313,13 +322,15 @@ export interface AnomalyReport {
 
 // ── API objects ───────────────────────────────────────────────────────────────
 
+export type AuthPeriodHours = 1 | 6 | 24 | 168 | 240;
+
 export const eventsApi = {
   list:               (filters: EventFilters = {}) => listEvents({ data: filters }),
   get:                (id: string)                  => getEvent({ data: { id } }),
   stats:              ()                            => getStatsSummary(),
   timeline:           (hours?: number)              => getTimeline({ data: { hours } }),
-  authErrorStats:     ()                            => getAuthErrorStats(),
-  kongAuthStats:      ()                            => getKongAuthStats(),
+  authErrorStats:     (period: AuthPeriodHours = 24) => getAuthErrorStats({ data: { period } }),
+  kongAuthStats:      (period: AuthPeriodHours = 24) => getKongAuthStats({ data: { period } }),
   datadogOverview:    ()                            => getDatadogOverview(),
   gocacheOverview:    ()                            => getGocacheOverview(),
   datadogMetrics:     ()                            => getDatadogMetrics(),

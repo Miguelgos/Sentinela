@@ -1,15 +1,45 @@
 import { createServerFn } from "@tanstack/react-start";
-import { getEvents, isReady, storeCoverage } from "../../../backend/src/accumulator";
 import {
+  getBucketStore,
+  getEventStore,
+  getHistoricalClusters,
+  isReady,
+  storeCoverage,
+  storeSize,
+  SEQ,
+} from "../../../backend/src/accumulators/seqAccumulator";
+import {
+  auditDetectors,
   buildAnomalyPrompt,
   buildTimelinesForProblems,
   correlateProblems,
   detectors,
+  infraDetectors,
+  wafDetectors,
   MS_PER_MINUTE,
   type AnomalyEvent,
   type AnomalyProblem,
   type AnomalyTimeline,
+  type DetectorContext,
 } from "../../../backend/src/anomaly";
+import {
+  getWafBucketStore,
+  getWafEventStore,
+  isWafReady,
+  WAF,
+} from "../../../backend/src/accumulators/wafAccumulator";
+import {
+  getAuditBucketStore,
+  getAuditEventStore,
+  isAuditReady,
+  AUDIT,
+} from "../../../backend/src/accumulators/auditAccumulator";
+import {
+  getInfraBucketStore,
+  isInfraReady,
+  INFRA,
+} from "../../../backend/src/accumulators/infraAccumulator";
+import { EventStore } from "../../../backend/src/timeseries/eventStore";
 import { aiNarrative } from "../../../backend/src/lib/aiClient";
 
 export interface AnomalyReport {
@@ -52,20 +82,56 @@ async function attachNarratives(problems: AnomalyProblem[]): Promise<{ narrative
 }
 
 export const getAnomalyReport = createServerFn({ method: "GET" }).handler(async (): Promise<AnomalyReport> => {
-  const events = getEvents();
   const nowMin = Math.floor(Date.now() / MS_PER_MINUTE);
 
-  const anomalies = detectors.flatMap(detect => detect(events, nowMin));
+  const seqCtx: DetectorContext = {
+    bucketStore: getBucketStore(),
+    eventStore: getEventStore(),
+    historicalClusters: getHistoricalClusters(),
+    nowMin,
+    source: SEQ,
+  };
+  const wafCtx: DetectorContext = {
+    bucketStore: getWafBucketStore(),
+    eventStore: getWafEventStore() as unknown as DetectorContext["eventStore"],
+    historicalClusters: new Set(),
+    nowMin,
+    source: WAF,
+  };
+  const auditCtx: DetectorContext = {
+    bucketStore: getAuditBucketStore(),
+    eventStore: getAuditEventStore() as unknown as DetectorContext["eventStore"],
+    historicalClusters: new Set(),
+    nowMin,
+    source: AUDIT,
+  };
+  // Infra não tem eventStore (só métricas) — usa stub vazio.
+  const infraCtx: DetectorContext = {
+    bucketStore: getInfraBucketStore(),
+    eventStore: new EventStore() as unknown as DetectorContext["eventStore"],
+    historicalClusters: new Set(),
+    nowMin,
+    source: INFRA,
+  };
+
+  const anomalies = [
+    ...detectors.flatMap(detect => detect(seqCtx)),
+    ...wafDetectors.flatMap(detect => detect(wafCtx)),
+    ...auditDetectors.flatMap(detect => detect(auditCtx)),
+    ...infraDetectors.flatMap(detect => detect(infraCtx)),
+  ];
   const problems = correlateProblems(anomalies);
-  const timelines = buildTimelinesForProblems(problems, events, nowMin);
+  // Timelines: usa o ctx do source da anomaly head — implementação simples
+  // pega só do Seq por enquanto. Próxima iteração: timelines multi-source.
+  const timelines = buildTimelinesForProblems(problems, seqCtx);
 
   const { narrativeError } = await attachNarratives(problems);
 
   return {
     generatedAt: new Date().toISOString(),
-    ready: isReady(),
+    ready: isReady() && isWafReady() && isAuditReady() && isInfraReady(),
     coverage: storeCoverage(),
-    totalEvents: events.length,
+    totalEvents: storeSize(),
     problems,
     anomalies,
     timelines,

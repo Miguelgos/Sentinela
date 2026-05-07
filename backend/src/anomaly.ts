@@ -1,8 +1,22 @@
 // Davis-style anomaly detection — auto-adaptive thresholds (P99 + IQR) com
-// gatilho 3-de-5 minutos sobre janela de 7 dias. Veja docs/anomaly-detection-plan.md.
+// gatilho 3-de-5 minutos sobre janela de 10 dias. Veja docs/anomaly-detection-plan.md.
 
-import type { StoredEvent } from "./accumulator";
+import type { StoredEvent } from "./accumulators/seqAccumulator";
+import type { BucketStore } from "./timeseries/bucketStore";
+import type { EventStore } from "./timeseries/eventStore";
 import { areRelated, rootCauseService } from "./topology";
+
+// Contexto passado para cada detector. bucketStore alimenta as séries de 10d;
+// eventStore alimenta detectores que precisam do texto do evento (newMessage);
+// historicalClusters mantém set persistente de clusters de mensagem vistos
+// fora da janela de 1h (substitui o set efêmero do detector antigo).
+export interface DetectorContext {
+  bucketStore: BucketStore;
+  eventStore: EventStore<StoredEvent>;
+  historicalClusters: Set<string>;
+  nowMin: number;
+  source: string; // ex: "seq" — qual sub-namespace do bucketStore consultar
+}
 
 export type Severity = "CRITICAL" | "HIGH" | "MEDIUM";
 export type DetectorId =
@@ -10,7 +24,14 @@ export type DetectorId =
   | "ERROR_RATE_ENDPOINT"
   | "AUTH_BURST"
   | "NEW_MESSAGE"
-  | "OFF_HOURS";
+  | "OFF_HOURS"
+  | "WAF_BURST"
+  | "NEW_ATTACK_ORIGIN"
+  | "AUDIT_OFF_HOURS"
+  | "NEW_AUDIT_USER"
+  | "EXTERNAL_IP_AUDIT_SPIKE"
+  | "POD_RESTART_SPIKE"
+  | "INFRA_OFF_HOURS";
 
 export interface TimeSeries {
   dimension: string;
@@ -46,7 +67,7 @@ export interface AnomalyProblem {
 }
 
 export const MS_PER_MINUTE = 60_000;
-export const REFERENCE_WINDOW_DAYS = 7;
+export const REFERENCE_WINDOW_DAYS = 10;
 export const REFERENCE_WINDOW_MIN = REFERENCE_WINDOW_DAYS * 24 * 60;
 const MIN_SAMPLES_FOR_BASELINE = 3 * 24 * 60; // 3 dias × 1440 min
 
@@ -355,28 +376,6 @@ export function correlateProblems(anomalies: AnomalyEvent[]): AnomalyProblem[] {
 
 // ── Detectors ─────────────────────────────────────────────────────────────────
 
-const ERROR_LEVELS = new Set(["Error", "Critical", "Fatal"]);
-
-function isErrorLevel(e: StoredEvent): boolean {
-  return ERROR_LEVELS.has(e.level);
-}
-
-export const detectErrorRatePerService = (
-  events: StoredEvent[],
-  nowMin: number,
-): AnomalyEvent[] => {
-  const seriesMap = buildTimeSeries(
-    events.filter(isErrorLevel),
-    (e) => (e.service ? `service:${e.service}` : null),
-  );
-  const out: AnomalyEvent[] = [];
-  for (const series of seriesMap.values()) {
-    const baseline = computeBaseline(series, nowMin);
-    out.push(...detectAnomalies(series, baseline, nowMin, { detector: "ERROR_RATE_SERVICE" }));
-  }
-  return out;
-};
-
 // Endpoints com pouco tráfego histórico geram falsos positivos (P99 = 0, qualquer
 // minuto com 1 evento dispara). Filtra dimensões com menos de 50 eventos no
 // histórico — equivale a "endpoint visto pelo menos algumas vezes por dia".
@@ -391,76 +390,76 @@ function totalEventsInWindow(series: TimeSeries, refWindowEndMin: number): numbe
   return total;
 }
 
-export const detectErrorRatePerEndpoint = (
-  events: StoredEvent[],
-  nowMin: number,
-): AnomalyEvent[] => {
-  const seriesMap = buildTimeSeries(
-    events.filter(isErrorLevel),
-    (e) => (e.request_path ? `endpoint:${e.request_path.split("?")[0]}` : null),
-  );
+// Helper: itera dimensões filtrando por prefixo, normaliza chave (remove prefix)
+// e roda detectAnomalies. Agora todos os detectores baseados em bucketStore
+// usam essa estrutura.
+function detectByPrefix(
+  ctx: DetectorContext,
+  prefix: string,
+  reportPrefix: string,
+  detectorId: DetectorId,
+  opts: { minHistorical?: number } = {},
+): AnomalyEvent[] {
   const out: AnomalyEvent[] = [];
-  for (const series of seriesMap.values()) {
-    if (totalEventsInWindow(series, nowMin) < ENDPOINT_MIN_HISTORICAL_EVENTS) continue;
-    const baseline = computeBaseline(series, nowMin);
-    out.push(...detectAnomalies(series, baseline, nowMin, { detector: "ERROR_RATE_ENDPOINT" }));
+  for (const dim of ctx.bucketStore.getDimensions(ctx.source)) {
+    if (!dim.startsWith(prefix)) continue;
+    const series = ctx.bucketStore.getSeries(ctx.source, dim, ctx.nowMin);
+    // Renomeia para apresentação externa (ex: "error_service:X" → "service:X")
+    const reportDim = reportPrefix + dim.slice(prefix.length);
+    const renamed: TimeSeries = { dimension: reportDim, buckets: series.buckets };
+    if (opts.minHistorical && totalEventsInWindow(renamed, ctx.nowMin) < opts.minHistorical) continue;
+    const baseline = computeBaseline(renamed, ctx.nowMin);
+    out.push(...detectAnomalies(renamed, baseline, ctx.nowMin, { detector: detectorId }));
   }
   return out;
+}
+
+export const detectErrorRatePerService = (ctx: DetectorContext): AnomalyEvent[] =>
+  detectByPrefix(ctx, "error_service:", "service:", "ERROR_RATE_SERVICE");
+
+export const detectErrorRatePerEndpoint = (ctx: DetectorContext): AnomalyEvent[] =>
+  detectByPrefix(ctx, "error_endpoint:", "endpoint:", "ERROR_RATE_ENDPOINT", {
+    minHistorical: ENDPOINT_MIN_HISTORICAL_EVENTS,
+  });
+
+export const detectAuthBurst = (ctx: DetectorContext): AnomalyEvent[] => {
+  const series = ctx.bucketStore.getSeries(ctx.source, "auth_failure", ctx.nowMin);
+  if (series.buckets.size === 0) return [];
+  // Renomeia dimensão para o nome histórico da UI
+  const renamed: TimeSeries = { dimension: "auth_failures", buckets: series.buckets };
+  const baseline = computeBaseline(renamed, ctx.nowMin);
+  return detectAnomalies(renamed, baseline, ctx.nowMin, { detector: "AUTH_BURST" });
 };
 
-const AUTH_FAIL_PATTERN = /erro\s+autentica|autentic.*fal|invalid_grant|unauthorized/i;
-
-export const detectAuthBurst = (
-  events: StoredEvent[],
-  nowMin: number,
-): AnomalyEvent[] => {
-  const series = buildTimeSeries(
-    events.filter((e) => AUTH_FAIL_PATTERN.test(e.message ?? "")),
-    () => "auth_failures",
-  ).get("auth_failures");
-  if (!series) return [];
-  const baseline = computeBaseline(series, nowMin);
-  return detectAnomalies(series, baseline, nowMin, { detector: "AUTH_BURST" });
-};
-
-// Set-diff de mensagens. Considera "mensagem" um prefixo de 80 chars (cluster
-// simples) — evita explodir cardinalidade com IDs/timestamps no template.
-const MESSAGE_PREFIX_LEN = 80;
 const NEW_MESSAGE_LOOKBACK_MIN = 60;
+const MESSAGE_PREFIX_LEN = 80;
 
-function clusterKey(message: string | null | undefined): string | null {
+export function clusterKey(message: string | null | undefined): string | null {
   if (!message) return null;
   return message.slice(0, MESSAGE_PREFIX_LEN).replace(/\d+/g, "#").trim();
 }
 
-export const detectNewMessage = (
-  events: StoredEvent[],
-  nowMin: number,
-): AnomalyEvent[] => {
-  const cutoffRecent = (nowMin - NEW_MESSAGE_LOOKBACK_MIN) * MS_PER_MINUTE;
-  const cutoffHistory = (nowMin - REFERENCE_WINDOW_MIN) * MS_PER_MINUTE;
+const ERROR_LEVELS = new Set(["Error", "Critical", "Fatal"]);
 
-  const historic = new Set<string>();
+// Lê últimas LOOKBACK_MIN de eventos brutos do eventStore, agrupa por cluster,
+// dispara se cluster não está em historicalClusters (set persistente).
+export const detectNewMessage = (ctx: DetectorContext): AnomalyEvent[] => {
+  const recentEvents = ctx.eventStore.list(ctx.source, ctx.nowMin - NEW_MESSAGE_LOOKBACK_MIN);
   const recent = new Map<string, { count: number; firstSeen: string }>();
 
-  for (const e of events) {
-    if (!isErrorLevel(e)) continue;
+  for (const e of recentEvents) {
+    if (!ERROR_LEVELS.has(e.level)) continue;
     const key = clusterKey(e.message);
     if (!key) continue;
-    const ts = new Date(e.timestamp).getTime();
-    if (ts >= cutoffRecent) {
-      const cur = recent.get(key);
-      if (!cur) recent.set(key, { count: 1, firstSeen: e.timestamp });
-      else cur.count++;
-    } else if (ts >= cutoffHistory) {
-      historic.add(key);
-    }
+    const cur = recent.get(key);
+    if (!cur) recent.set(key, { count: 1, firstSeen: e.timestamp });
+    else cur.count++;
   }
 
   const out: AnomalyEvent[] = [];
   for (const [key, { count, firstSeen }] of recent) {
-    if (historic.has(key)) continue;
-    if (count < 3) continue; // ignora ruído único — exige reincidência
+    if (ctx.historicalClusters.has(key)) continue;
+    if (count < 3) continue; // exige reincidência
 
     out.push({
       detector: "NEW_MESSAGE",
@@ -488,6 +487,13 @@ const DETECTOR_LABEL: Record<DetectorId, string> = {
   AUTH_BURST:          "Burst de falhas de autenticação",
   NEW_MESSAGE:         "Mensagem inédita",
   OFF_HOURS:           "Atividade off-hours",
+  WAF_BURST:           "Pico de bloqueios WAF",
+  NEW_ATTACK_ORIGIN:   "Origem de ataque inédita",
+  AUDIT_OFF_HOURS:     "Auditoria off-hours",
+  NEW_AUDIT_USER:      "Usuário de auditoria inédito",
+  EXTERNAL_IP_AUDIT_SPIKE: "Pico de IP externo em auditoria",
+  POD_RESTART_SPIKE:   "Spike de restarts em deployment",
+  INFRA_OFF_HOURS:     "Atividade infra off-hours",
 };
 
 export function buildAnomalyPrompt(problem: AnomalyProblem): string {
@@ -528,31 +534,46 @@ export interface AnomalyTimeline {
 
 const TIMELINE_WINDOW_MIN = 60;
 
-// Reconstrói série temporal pra uma dimensão específica usando o extractor
-// derivado do detectorId. Calcula baseline + threshold + últimos 60 minutos.
+// Mapeia detectorId → (prefix bucketStore, prefix de apresentação) pra reconstruir
+// timeline a partir do bucketStore.
+function dimMappingForTimeline(
+  detectorId: DetectorId,
+  reportDimension: string,
+): { bucketDim: string; reportDim: string } | null {
+  switch (detectorId) {
+    case "ERROR_RATE_SERVICE":
+      // reportDim = "service:salesbo" → bucketDim = "error_service:salesbo"
+      return { bucketDim: reportDimension.replace(/^service:/, "error_service:"), reportDim: reportDimension };
+    case "ERROR_RATE_ENDPOINT":
+      return { bucketDim: reportDimension.replace(/^endpoint:/, "error_endpoint:"), reportDim: reportDimension };
+    case "AUTH_BURST":
+      return { bucketDim: "auth_failure", reportDim: "auth_failures" };
+    case "OFF_HOURS":
+      return { bucketDim: reportDimension, reportDim: reportDimension };
+    default:
+      return null;
+  }
+}
+
 function timelineFor(
   detectorId: DetectorId,
-  dimension: string,
-  events: StoredEvent[],
-  nowMin: number,
+  reportDimension: string,
+  ctx: DetectorContext,
 ): AnomalyTimeline | null {
-  const extractor = extractorForDetector(detectorId);
-  if (!extractor) return null;
-  const filtered = events.filter(e => extractor(e) === dimension);
-  if (filtered.length === 0) return null;
+  const mapping = dimMappingForTimeline(detectorId, reportDimension);
+  if (!mapping) return null;
+  const series = ctx.bucketStore.getSeries(ctx.source, mapping.bucketDim, ctx.nowMin);
+  if (series.buckets.size === 0) return null;
 
-  const series = buildTimeSeries(filtered, () => dimension).get(dimension);
-  if (!series) return null;
-
-  const baseline = computeBaseline(series, nowMin);
+  const baseline = computeBaseline({ dimension: mapping.reportDim, buckets: series.buckets }, ctx.nowMin);
   const threshold = thresholdFor(baseline);
   const points: AnomalyTimeline["points"] = [];
-  for (let m = nowMin - TIMELINE_WINDOW_MIN + 1; m <= nowMin; m++) {
+  for (let m = ctx.nowMin - TIMELINE_WINDOW_MIN + 1; m <= ctx.nowMin; m++) {
     points.push({ minute: m, metric: series.buckets.get(m) ?? 0 });
   }
 
   return {
-    dimension,
+    dimension: mapping.reportDim,
     detector: detectorId,
     baseline: baseline.p99,
     threshold,
@@ -560,23 +581,9 @@ function timelineFor(
   };
 }
 
-function extractorForDetector(detectorId: DetectorId): ((e: StoredEvent) => string | null) | null {
-  switch (detectorId) {
-    case "ERROR_RATE_SERVICE":
-      return (e) => isErrorLevel(e) && e.service ? `service:${e.service}` : null;
-    case "ERROR_RATE_ENDPOINT":
-      return (e) => isErrorLevel(e) && e.request_path ? `endpoint:${e.request_path.split("?")[0]}` : null;
-    case "AUTH_BURST":
-      return (e) => AUTH_FAIL_PATTERN.test(e.message ?? "") ? "auth_failures" : null;
-    default:
-      return null;
-  }
-}
-
 export function buildTimelinesForProblems(
   problems: AnomalyProblem[],
-  events: StoredEvent[],
-  nowMin: number,
+  ctx: DetectorContext,
   limit: number = 3,
 ): AnomalyTimeline[] {
   const out: AnomalyTimeline[] = [];
@@ -586,13 +593,13 @@ export function buildTimelinesForProblems(
     const key = `${head.detector}:${head.dimension}`;
     if (seen.has(key)) continue;
     seen.add(key);
-    const tl = timelineFor(head.detector, head.dimension, events, nowMin);
+    const tl = timelineFor(head.detector, head.dimension, ctx);
     if (tl) out.push(tl);
   }
   return out;
 }
 
-export type Detector = (events: StoredEvent[], nowMin: number) => AnomalyEvent[];
+export type Detector = (ctx: DetectorContext) => AnomalyEvent[];
 
 // Off-hours: 0h-6h UTC (~ 21h-3h horário Brasil). Volume nesse slot que exceda
 // a baseline do próprio slot é fortemente suspeito (deploy às 3h, scanner
@@ -600,21 +607,85 @@ export type Detector = (events: StoredEvent[], nowMin: number) => AnomalyEvent[]
 const OFF_HOURS_START_UTC = 0;
 const OFF_HOURS_END_UTC = 6;
 
-export const detectOffHoursVolume = (
-  events: StoredEvent[],
-  nowMin: number,
-): AnomalyEvent[] => {
-  const hour = new Date(nowMin * MS_PER_MINUTE).getUTCHours();
+export const detectOffHoursVolume = (ctx: DetectorContext): AnomalyEvent[] => {
+  const hour = new Date(ctx.nowMin * MS_PER_MINUTE).getUTCHours();
   if (hour < OFF_HOURS_START_UTC || hour >= OFF_HOURS_END_UTC) return [];
 
-  const seriesMap = buildTimeSeries(
-    events,
-    (e) => (e.service ? `service:${e.service}` : null),
-  );
   const out: AnomalyEvent[] = [];
-  for (const series of seriesMap.values()) {
-    const baseline = computeSeasonalBaseline(series, nowMin);
-    out.push(...detectSeasonalAnomalies(series, baseline, nowMin, { detector: "OFF_HOURS" }));
+  for (const dim of ctx.bucketStore.getDimensions(ctx.source)) {
+    if (!dim.startsWith("service:")) continue;
+    const series = ctx.bucketStore.getSeries(ctx.source, dim, ctx.nowMin);
+    const baseline = computeSeasonalBaseline(series, ctx.nowMin);
+    out.push(...detectSeasonalAnomalies(series, baseline, ctx.nowMin, { detector: "OFF_HOURS" }));
+  }
+  return out;
+};
+
+// ── Detectors WAF (Fase 4.2) ─────────────────────────────────────────────────
+
+// Pico em qualquer dimensão WAF (attack:*, country:*, tool:*).
+const WAF_DIMENSION_PREFIXES = ["attack:", "country:", "tool:"];
+
+export const detectWafBurst = (ctx: DetectorContext): AnomalyEvent[] => {
+  const out: AnomalyEvent[] = [];
+  for (const dim of ctx.bucketStore.getDimensions(ctx.source)) {
+    if (!WAF_DIMENSION_PREFIXES.some(p => dim.startsWith(p))) continue;
+    const series = ctx.bucketStore.getSeries(ctx.source, dim, ctx.nowMin);
+    if (series.buckets.size === 0) continue;
+    const baseline = computeBaseline({ dimension: dim, buckets: series.buckets }, ctx.nowMin);
+    out.push(...detectAnomalies(
+      { dimension: dim, buckets: series.buckets },
+      baseline,
+      ctx.nowMin,
+      { detector: "WAF_BURST" },
+    ));
+  }
+  return out;
+};
+
+// Set-diff: country que aparece nas últimas NEW_ORIGIN_LOOKBACK_MIN e que não
+// foi vista no histórico (>NEW_ORIGIN_LOOKBACK_MIN atrás dentro da janela 10d).
+// Severidade depende do volume — só dispara com >=10 eventos pra evitar
+// ruído de turismo.
+const NEW_ORIGIN_LOOKBACK_MIN = 60;
+const NEW_ORIGIN_MIN_COUNT = 10;
+
+export const detectNewAttackOrigin = (ctx: DetectorContext): AnomalyEvent[] => {
+  const out: AnomalyEvent[] = [];
+  const recentCutoff = ctx.nowMin - NEW_ORIGIN_LOOKBACK_MIN;
+  for (const dim of ctx.bucketStore.getDimensions(ctx.source)) {
+    if (!dim.startsWith("country:")) continue;
+    const series = ctx.bucketStore.getSeries(ctx.source, dim, ctx.nowMin);
+    let recentCount = 0;
+    let historicalCount = 0;
+    let firstRecentMin = ctx.nowMin;
+    for (const [m, count] of series.buckets) {
+      if (m >= recentCutoff) {
+        recentCount += count;
+        if (m < firstRecentMin) firstRecentMin = m;
+      } else {
+        historicalCount += count;
+      }
+    }
+    if (historicalCount > 0) continue; // já era conhecido
+    if (recentCount < NEW_ORIGIN_MIN_COUNT) continue;
+
+    out.push({
+      detector: "NEW_ATTACK_ORIGIN",
+      dimension: dim,
+      metric: recentCount,
+      baseline: 0,
+      threshold: 0,
+      violationsInWindow: recentCount,
+      windowSize: NEW_ORIGIN_LOOKBACK_MIN,
+      severity: recentCount >= 100 ? "HIGH" : "MEDIUM",
+      detectedAt: new Date(firstRecentMin * MS_PER_MINUTE).toISOString(),
+      evidence: [
+        `Origem inédita nos últimos ${REFERENCE_WINDOW_DAYS}d`,
+        `${recentCount} eventos na última hora`,
+        `Padrão: ${dim}`,
+      ],
+    });
   }
   return out;
 };
@@ -625,4 +696,138 @@ export const detectors: Detector[] = [
   detectAuthBurst,
   detectNewMessage,
   detectOffHoursVolume,
+];
+
+// Detectores WAF rodam contra um source diferente (ctx.source = "waf"). Server
+// fn cria um ctx para cada source e roda os detectores aplicáveis.
+export const wafDetectors: Detector[] = [
+  detectWafBurst,
+  detectNewAttackOrigin,
+];
+
+// ── Detectors Audit (Fase 4.3) ───────────────────────────────────────────────
+
+// Off-hours em qualquer service de auditoria — usa baseline sazonal.
+export const detectAuditOffHours = (ctx: DetectorContext): AnomalyEvent[] => {
+  const hour = new Date(ctx.nowMin * MS_PER_MINUTE).getUTCHours();
+  if (hour < OFF_HOURS_START_UTC || hour >= OFF_HOURS_END_UTC) return [];
+
+  const out: AnomalyEvent[] = [];
+  for (const dim of ctx.bucketStore.getDimensions(ctx.source)) {
+    // service:Integra (root) — não service:X:user:Y nem :external_ip
+    if (!dim.startsWith("service:") || dim.split(":").length > 2) continue;
+    const series = ctx.bucketStore.getSeries(ctx.source, dim, ctx.nowMin);
+    const baseline = computeSeasonalBaseline(series, ctx.nowMin);
+    out.push(...detectSeasonalAnomalies(series, baseline, ctx.nowMin, { detector: "AUDIT_OFF_HOURS" }));
+  }
+  return out;
+};
+
+// User inédito × histórico 10d, com volume relevante.
+const NEW_USER_LOOKBACK_MIN = 60;
+const NEW_USER_MIN_COUNT = 10;
+
+export const detectNewAuditUser = (ctx: DetectorContext): AnomalyEvent[] => {
+  const out: AnomalyEvent[] = [];
+  const recentCutoff = ctx.nowMin - NEW_USER_LOOKBACK_MIN;
+  for (const dim of ctx.bucketStore.getDimensions(ctx.source)) {
+    // dim = service:X:user:Y → 4 partes
+    const parts = dim.split(":");
+    if (parts.length !== 4 || parts[0] !== "service" || parts[2] !== "user") continue;
+    const series = ctx.bucketStore.getSeries(ctx.source, dim, ctx.nowMin);
+    let recent = 0, historical = 0, firstRecent = ctx.nowMin;
+    for (const [m, c] of series.buckets) {
+      if (m >= recentCutoff) {
+        recent += c;
+        if (m < firstRecent) firstRecent = m;
+      } else historical += c;
+    }
+    if (historical > 0) continue;
+    if (recent < NEW_USER_MIN_COUNT) continue;
+
+    out.push({
+      detector: "NEW_AUDIT_USER",
+      dimension: dim,
+      metric: recent,
+      baseline: 0,
+      threshold: 0,
+      violationsInWindow: recent,
+      windowSize: NEW_USER_LOOKBACK_MIN,
+      severity: recent >= 100 ? "HIGH" : "MEDIUM",
+      detectedAt: new Date(firstRecent * MS_PER_MINUTE).toISOString(),
+      evidence: [
+        `Usuário inédito nos últimos ${REFERENCE_WINDOW_DAYS}d`,
+        `${recent} acessos na última hora`,
+        `Padrão: ${dim}`,
+      ],
+    });
+  }
+  return out;
+};
+
+// Pico de acessos com IP externo via baseline normal (não sazonal).
+export const detectExternalIpAuditSpike = (ctx: DetectorContext): AnomalyEvent[] => {
+  const out: AnomalyEvent[] = [];
+  for (const dim of ctx.bucketStore.getDimensions(ctx.source)) {
+    if (!dim.endsWith(":external_ip")) continue;
+    const series = ctx.bucketStore.getSeries(ctx.source, dim, ctx.nowMin);
+    if (series.buckets.size === 0) continue;
+    const baseline = computeBaseline({ dimension: dim, buckets: series.buckets }, ctx.nowMin);
+    out.push(...detectAnomalies(
+      { dimension: dim, buckets: series.buckets },
+      baseline,
+      ctx.nowMin,
+      { detector: "EXTERNAL_IP_AUDIT_SPIKE" },
+    ));
+  }
+  return out;
+};
+
+export const auditDetectors: Detector[] = [
+  detectAuditOffHours,
+  detectNewAuditUser,
+  detectExternalIpAuditSpike,
+];
+
+// ── Detectors Infra (Fase 4.4) ───────────────────────────────────────────────
+
+export const detectPodRestartSpike = (ctx: DetectorContext): AnomalyEvent[] => {
+  const out: AnomalyEvent[] = [];
+  for (const dim of ctx.bucketStore.getDimensions(ctx.source)) {
+    if (!dim.startsWith("pod_restart:")) continue;
+    const series = ctx.bucketStore.getSeries(ctx.source, dim, ctx.nowMin);
+    if (series.buckets.size === 0) continue;
+    const baseline = computeBaseline({ dimension: dim, buckets: series.buckets }, ctx.nowMin);
+    out.push(...detectAnomalies(
+      { dimension: dim, buckets: series.buckets },
+      baseline,
+      ctx.nowMin,
+      { detector: "POD_RESTART_SPIKE" },
+    ));
+  }
+  return out;
+};
+
+// Volume de alertas/CPU/restarts em horário off-hours (Datadog mete tudo no
+// bucketStore; off-hours é definido como acumular alert_firing fora da janela
+// de operação normal).
+export const detectInfraOffHours = (ctx: DetectorContext): AnomalyEvent[] => {
+  const hour = new Date(ctx.nowMin * MS_PER_MINUTE).getUTCHours();
+  if (hour < OFF_HOURS_START_UTC || hour >= OFF_HOURS_END_UTC) return [];
+
+  const out: AnomalyEvent[] = [];
+  for (const dim of ctx.bucketStore.getDimensions(ctx.source)) {
+    // Foca em alertas e restarts — CPU/disk em horário off-hours não é
+    // necessariamente anômalo (batch jobs noturnos).
+    if (!dim.startsWith("alert_firing") && !dim.startsWith("pod_restart:")) continue;
+    const series = ctx.bucketStore.getSeries(ctx.source, dim, ctx.nowMin);
+    const baseline = computeSeasonalBaseline(series, ctx.nowMin);
+    out.push(...detectSeasonalAnomalies(series, baseline, ctx.nowMin, { detector: "INFRA_OFF_HOURS" }));
+  }
+  return out;
+};
+
+export const infraDetectors: Detector[] = [
+  detectPodRestartSpike,
+  detectInfraOffHours,
 ];

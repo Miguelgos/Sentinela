@@ -1,4 +1,4 @@
-import { getEvents } from "./accumulator";
+import { getEvents, getBucketStore, getEventStore, getHistoricalClusters, SEQ } from "./accumulators/seqAccumulator";
 import { emailFrom } from "./seq";
 import { gcFetch } from "./lib/gcClient";
 import { ddFetch } from "./lib/ddClient";
@@ -257,7 +257,14 @@ export async function fetchThreatContext(): Promise<ThreatContext> {
   });
 
   const nowMin = Math.floor(Date.now() / MS_PER_MINUTE);
-  const anomalies = anomalyDetectors.flatMap(detect => detect(seqEvents, nowMin));
+  const detCtx = {
+    bucketStore: getBucketStore(),
+    eventStore: getEventStore(),
+    historicalClusters: getHistoricalClusters(),
+    nowMin,
+    source: SEQ,
+  };
+  const anomalies = anomalyDetectors.flatMap(detect => detect(detCtx));
   const anomalyProblems = correlateProblems(anomalies);
 
   return {
