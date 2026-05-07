@@ -3,11 +3,13 @@ import { fetchSeq, prop, truncHour, emailFrom, clientFrom } from "../../../backe
 import {
   getEvents,
   getEventById,
+  getBucketStore,
   isReady,
   storeSize,
   storeCoverage,
   getSyncProgress,
-} from "../../../backend/src/accumulator";
+  SEQ,
+} from "../../../backend/src/accumulators/seqAccumulator";
 import type { EventFilters } from "../../../frontend/src/lib/api";
 
 const seqCache = new Map<string, { ts: number; data: unknown }>();
@@ -145,10 +147,50 @@ export const getTimeline = createServerFn({ method: "GET" })
     return result;
   });
 
-export const getAuthErrorStats = createServerFn({ method: "GET" }).handler(async () =>
-  memoizeSeq("getAuthErrorStats", async () => {
+// Períodos suportados em horas. 240h = 10 dias (limite do bucketStore).
+export type AuthPeriodHours = 1 | 6 | 24 | 168 | 240;
+
+function clampPeriod(h: number | undefined): AuthPeriodHours {
+  if (h === 1 || h === 6 || h === 24 || h === 168 || h === 240) return h;
+  return 24;
+}
+
+// Constrói timeline horária a partir do bucketStore (dim: auth_failure, 10d).
+// Trunca pra janela `periodHours` mais recente.
+function bucketTimelineHourly(periodHours: number, dim: string): { hour: string; count: number }[] {
+  const nowMin = Math.floor(Date.now() / 60_000);
+  const periodMin = periodHours * 60;
+  const series = getBucketStore().getSeries(SEQ, dim, nowMin);
+  const startMin = nowMin - periodMin;
+
+  const byHour = new Map<string, number>();
+  for (const [m, count] of series.buckets) {
+    if (m < startMin) continue;
+    const hourMs = Math.floor(m / 60) * 60 * 60_000;
+    const hourIso = new Date(hourMs).toISOString();
+    byHour.set(hourIso, (byHour.get(hourIso) ?? 0) + count);
+  }
+  // Preenche horas vazias para gráfico contínuo
+  const out: { hour: string; count: number }[] = [];
+  const startHourMs = Math.floor((startMin / 60)) * 60 * 60_000;
+  const endHourMs   = Math.floor((nowMin / 60))   * 60 * 60_000;
+  for (let h = startHourMs; h <= endHourMs; h += 3_600_000) {
+    const iso = new Date(h).toISOString();
+    out.push({ hour: iso, count: byHour.get(iso) ?? 0 });
+  }
+  return out;
+}
+
+export const getAuthErrorStats = createServerFn({ method: "GET" })
+  .validator((data: { period?: number } | undefined) => data ?? {})
+  .handler(async ({ data }) => {
+    const period = clampPeriod(data?.period);
+    const fromDate = new Date(Date.now() - period * 3600 * 1000);
+
+    return memoizeSeq(`getAuthErrorStats:${period}`, async () => {
     const auth = await fetchSeq({
       filter:   "Contains(@Message, 'Erro autenticação')",
+      fromDate,
       maxTotal: 10000,
     });
 
@@ -173,8 +215,14 @@ export const getAuthErrorStats = createServerFn({ method: "GET" }).handler(async
       if (cl) clientCount[cl] = (clientCount[cl] ?? 0) + 1;
     }
 
-    const timeline = Object.keys(tlMap).sort().map(h => ({
-      hour: h, count: String(tlMap[h].count), unique_users: String(tlMap[h].users.size),
+    // Timeline vem do bucketStore (auth_failure, até 10d). Mais robusto que
+    // tlMap derivado de fetchSeq que é capado em 10k eventos.
+    const bucketSeries = bucketTimelineHourly(period, "auth_failure");
+    const timeline = bucketSeries.map(({ hour, count }) => ({
+      hour,
+      count: String(count),
+      // unique_users só calculável a partir dos eventos do fetchSeq
+      unique_users: String(tlMap[hour]?.users.size ?? 0),
     }));
 
     const topUsers = Object.entries(userAgg)
@@ -196,14 +244,20 @@ export const getAuthErrorStats = createServerFn({ method: "GET" }).handler(async
       request_path: e.request_path,
     }));
 
-    return { total: auth.length, timeline, topUsers, topClients, recentEvents };
-  }),
-);
+    return { total: auth.length, period, timeline, topUsers, topClients, recentEvents };
+    });
+  });
 
-export const getKongAuthStats = createServerFn({ method: "GET" }).handler(async () =>
-  memoizeSeq("getKongAuthStats", async () => {
+export const getKongAuthStats = createServerFn({ method: "GET" })
+  .validator((data: { period?: number } | undefined) => data ?? {})
+  .handler(async ({ data }) => {
+    const period = clampPeriod(data?.period);
+    const fromDate = new Date(Date.now() - period * 3600 * 1000);
+
+    return memoizeSeq(`getKongAuthStats:${period}`, async () => {
     const kongAll = await fetchSeq({
       filter:   "@Message = 'Kong Auth Request'",
+      fromDate,
       maxTotal: 10000,
     });
 
@@ -308,8 +362,9 @@ export const getKongAuthStats = createServerFn({ method: "GET" }).handler(async 
         total, failures, successes, failures401: fail401, failures500: fail500,
         failurePct: total > 0 ? parseFloat((failures / total * 100).toFixed(1)) : 0,
       },
+      period,
       timeline, topUsers, topIPs, credentialStuffing: stuffing,
       anomalousUsernames, serverErrors, recentFailures,
     };
-  }),
-);
+    });
+  });

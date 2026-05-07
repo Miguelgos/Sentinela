@@ -15,7 +15,8 @@ import {
   ChartContainer, ChartTooltip, ChartTooltipContent,
   ChartLegend, ChartLegendContent, type ChartConfig,
 } from "@/components/ui/chart";
-import { eventsApi } from "@/lib/api";
+import { eventsApi, type KongAuthStats, type AuthPeriodHours } from "@/lib/api";
+import { PeriodSelect } from "@/components/analysis/PeriodSelect";
 
 const kongChartConfig = {
   sucessos: { label: "Sucesso (200)", color: "#22c55e" },
@@ -37,7 +38,11 @@ function StatusBadge({ code }: { code: number }) {
 }
 
 export function KongAuthAnalysis() {
-  const { data: stats, loading, error, reload } = useAnalysisData(() => eventsApi.kongAuthStats());
+  const [period, setPeriod] = useState<AuthPeriodHours>(24);
+  const { data: stats, loading, error, reload } = useAnalysisData<KongAuthStats>(
+    () => eventsApi.kongAuthStats(period),
+    ["kongAuthStats", String(period)],
+  );
   const [exporting, setExporting] = useState(false);
 
   async function handleExport() {
@@ -72,7 +77,8 @@ export function KongAuthAnalysis() {
       error={error}
       onReload={reload}
       action={
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-center">
+          <PeriodSelect value={period} onChange={setPeriod} />
           <Button variant="outline" size="sm" onClick={reload}>
             <RefreshCw className="h-3.5 w-3.5 mr-1" /> Atualizar
           </Button>

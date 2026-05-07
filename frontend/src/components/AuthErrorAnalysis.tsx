@@ -14,7 +14,8 @@ import {
 import {
   ChartContainer, ChartTooltip, ChartTooltipContent, type ChartConfig,
 } from "@/components/ui/chart";
-import { eventsApi, type AuthErrorStats } from "@/lib/api";
+import { eventsApi, type AuthErrorStats, type AuthPeriodHours } from "@/lib/api";
+import { PeriodSelect } from "@/components/analysis/PeriodSelect";
 import { formatTimestamp } from "@/lib/utils";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -37,7 +38,11 @@ function extractStatusCode(msg: string) {
 }
 
 export function AuthErrorAnalysis() {
-  const { data: stats, loading, error, reload } = useAnalysisData(() => eventsApi.authErrorStats());
+  const [period, setPeriod] = useState<AuthPeriodHours>(24);
+  const { data: stats, loading, error, reload } = useAnalysisData<AuthErrorStats>(
+    () => eventsApi.authErrorStats(period),
+    ["authErrorStats", String(period)],
+  );
   const [selected, setSelected] = useState<AuthErrorStats["recentEvents"][0] | null>(null);
   const [exporting, setExporting] = useState(false);
 
@@ -70,7 +75,8 @@ export function AuthErrorAnalysis() {
         onReload={reload}
         skeletonRows={3}
         action={
-          <div className="flex gap-2">
+          <div className="flex gap-2 items-center">
+            <PeriodSelect value={period} onChange={setPeriod} />
             <Button variant="outline" size="sm" onClick={reload}>
               <RefreshCw className="h-3.5 w-3.5 mr-1" /> Atualizar
             </Button>
