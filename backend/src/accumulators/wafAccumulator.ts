@@ -206,20 +206,19 @@ async function fetchGc(opts: FetchOpts): Promise<GcEvent[]> {
   return events;
 }
 
+// API do GoCache rejeita limit > 100 com HTTP 400 ("Limit não pode ser maior
+// que 100."). Sem offset/cursor exposto, paginamos via janela temporal: se
+// a chamada retorna 100 (cap), divide o intervalo ao meio e recursa. Pra
+// agora a profundidade é capada em 8 níveis (≈256 sub-intervalos por
+// type/dia) — suficiente pra dia com até ~25k eventos antes de saturar.
+const PAGE_LIMIT = 100;
+
 async function fetchRange(fromSec: number, toSec: number): Promise<GcEvent[]> {
-  // Faz 1 chamada por type — limit de 200 por chamada.
   const all: GcEvent[] = [];
   for (const type of TYPES) {
     if (!type) continue;
     try {
-      const evs = await fetchGc({
-        start_date: fromSec,
-        end_date: toSec,
-        type: [type],
-        action: ["block"],
-        limit: 200,
-      });
-      // anota o type pra dimensionsForGcEvent
+      const evs = await fetchTypeRange(type, fromSec, toSec, 0);
       for (const e of evs) e.type = type;
       all.push(...evs);
     } catch (err) {
@@ -227,6 +226,35 @@ async function fetchRange(fromSec: number, toSec: number): Promise<GcEvent[]> {
     }
   }
   return all;
+}
+
+async function fetchTypeRange(
+  type: GcEvent["type"],
+  fromSec: number,
+  toSec: number,
+  depth: number,
+): Promise<GcEvent[]> {
+  const evs = await fetchGc({
+    start_date: fromSec, end_date: toSec,
+    type: [type as GcEvent["type"]],
+    action: ["block"], limit: PAGE_LIMIT,
+  });
+  if (evs.length < PAGE_LIMIT || depth >= 8 || toSec - fromSec <= 60) {
+    return evs;
+  }
+  const mid = Math.floor((fromSec + toSec) / 2);
+  const [a, b] = await Promise.all([
+    fetchTypeRange(type, fromSec, mid, depth + 1),
+    fetchTypeRange(type, mid, toSec, depth + 1),
+  ]);
+  // Dedup por id (overlap em mid)
+  const seen = new Set<string>();
+  const out: GcEvent[] = [];
+  for (const e of [...a, ...b]) {
+    const id = `${e.ip}|${e.uri}|${e.timestamp ?? e.date}`;
+    if (!seen.has(id)) { seen.add(id); out.push(e); }
+  }
+  return out;
 }
 
 async function refresh(): Promise<void> {
