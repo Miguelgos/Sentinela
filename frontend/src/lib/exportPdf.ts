@@ -329,54 +329,6 @@ export function exportDashboardPdf(
   });
 }
 
-// ── Auth Errors ────────────────────────────────────────────────────────────
-export function exportAuthErrorPdf(stats: AuthErrorStats) {
-  withDocument("Falhas de Autenticação — /connect/token", "Falhas de Autenticação", "auth-errors", (doc, startY) => {
-    const peak = stats.timeline.reduce(
-      (m, t) => parseInt(t.count) > parseInt(m.count) ? t : m,
-      { hour: "", count: "0", unique_users: "0" },
-    );
-
-    let y = summaryBox(doc, startY, [
-      ["Total de Falhas",   nfmt(stats.total), RED],
-      ["Usuários afetados", nfmt(stats.topUsers.length), ORANGE],
-      ["Pico (hora)",       `${peak.count} erros`, ORANGE],
-      ["Principal Client",  stats.topClients[0]?.client_id || "—"],
-    ]);
-
-    if (stats.timeline.length > 0) {
-      y = tableSection(doc, y, "Timeline — Falhas por Hora",
-        [["Hora", "Falhas", "Usuários únicos"]],
-        stats.timeline.map(t => [hfmt(t.hour), t.count, t.unique_users]),
-        { color: RED, needPage: 40 });
-    }
-
-    if (stats.topUsers.length > 0) {
-      y = tableSection(doc, y, `Usuários com Mais Falhas (${stats.topUsers.length})`,
-        [["Email", "Falhas", "Último"]],
-        stats.topUsers.map(u => [u.email, u.count, ts(u.last_seen)]),
-        { needPage: 40 });
-    }
-
-    if (stats.topClients.length > 0) {
-      y = tableSection(doc, y, "Client IDs Envolvidos",
-        [["Client ID", "Falhas"]],
-        stats.topClients.map(c => [c.client_id, c.count]));
-    }
-
-    if (stats.recentEvents.length > 0) {
-      tableSection(doc, y, `Eventos Recentes (${stats.recentEvents.length})`,
-        [["Horário", "Nível", "Trace ID", "Path"]],
-        stats.recentEvents.map(e => [
-          ts(e.timestamp), e.level,
-          e.trace_id ? e.trace_id.slice(0, 16) + "…" : "—",
-          e.request_path || "—",
-        ]),
-        { fontSize: 7, color: RED, needPage: 40 });
-    }
-  });
-}
-
 // ── Threat Report ──────────────────────────────────────────────────────────
 const RISK_LABEL: Record<RiskLevel, string> = {
   CRITICAL: "CRÍTICO", HIGH: "ALTO", MEDIUM: "MÉDIO", LOW: "BAIXO", INFO: "INFO",
