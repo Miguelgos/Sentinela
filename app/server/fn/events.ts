@@ -10,6 +10,8 @@ import {
   getSyncProgress,
   SEQ,
 } from "../../../backend/src/accumulators/seqAccumulator";
+import { getKongBucketStore, KONG } from "../../../backend/src/accumulators/kongAccumulator";
+import type { BucketStore } from "../../../backend/src/timeseries/bucketStore";
 import type { EventFilters } from "../../../frontend/src/lib/api";
 
 const seqCache = new Map<string, { ts: number; data: unknown }>();
@@ -158,9 +160,18 @@ function clampPeriod(h: number | undefined): AuthPeriodHours {
 // Constrói timeline horária a partir do bucketStore (dim: auth_failure, 10d).
 // Trunca pra janela `periodHours` mais recente.
 function bucketTimelineHourly(periodHours: number, dim: string): { hour: string; count: number }[] {
+  return bucketTimelineHourlyFromStore(getBucketStore(), SEQ, periodHours, dim);
+}
+
+function bucketTimelineHourlyFromStore(
+  store: BucketStore,
+  source: string,
+  periodHours: number,
+  dim: string,
+): { hour: string; count: number }[] {
   const nowMin = Math.floor(Date.now() / 60_000);
   const periodMin = periodHours * 60;
-  const series = getBucketStore().getSeries(SEQ, dim, nowMin);
+  const series = store.getSeries(source, dim, nowMin);
   const startMin = nowMin - periodMin;
 
   const byHour = new Map<string, number>();
@@ -179,6 +190,18 @@ function bucketTimelineHourly(periodHours: number, dim: string): { hour: string;
     out.push({ hour: iso, count: byHour.get(iso) ?? 0 });
   }
   return out;
+}
+
+// Timeline do Kong (sucessos + falhas) lendo do kongBucketStore (10d).
+function kongTimelineHourly(periodHours: number): { hora: string; sucessos: number; falhas: number }[] {
+  const okSeries   = bucketTimelineHourlyFromStore(getKongBucketStore(), KONG, periodHours, "kong_ok");
+  const failSeries = bucketTimelineHourlyFromStore(getKongBucketStore(), KONG, periodHours, "kong_fail");
+  const failByHour = new Map(failSeries.map(p => [p.hour, p.count]));
+  return okSeries.map(p => ({
+    hora: p.hour,
+    sucessos: p.count,
+    falhas: failByHour.get(p.hour) ?? 0,
+  }));
 }
 
 export const getAuthErrorStats = createServerFn({ method: "GET" })
@@ -264,7 +287,6 @@ export const getKongAuthStats = createServerFn({ method: "GET" })
     let successes = 0;
     let fail401 = 0;
     let fail500 = 0;
-    const tlMap: Record<string, { f: number; s: number }> = {};
     const userAgg: Record<string, { falhas: number; first: string; last: string }> = {};
     const ipAgg: Record<string, { falhas: number; users: Set<string>; first: string; last: string }> = {};
     const anonAgg: Record<string, { count: number; ips: Set<string> }> = {};
@@ -275,15 +297,11 @@ export const getKongAuthStats = createServerFn({ method: "GET" })
     for (const e of kongAll) {
       const status = Number(prop(e, "StatusCode"));
       const isOk = status === 200;
-      const h = truncHour(e.timestamp);
-      if (!tlMap[h]) tlMap[h] = { f: 0, s: 0 };
       if (isOk) {
-        tlMap[h].s++;
         successes++;
         continue;
       }
 
-      tlMap[h].f++;
       if (status === 401) fail401++;
       if (status === 500) fail500++;
 
@@ -327,9 +345,9 @@ export const getKongAuthStats = createServerFn({ method: "GET" })
     const total = kongAll.length;
     const failures = total - successes;
 
-    const timeline = Object.keys(tlMap).sort().map(h => ({
-      hora: h, falhas: tlMap[h].f, sucessos: tlMap[h].s,
-    }));
+    // Timeline vem do kongBucketStore (10d) — independe do cap de 10k de fetchSeq
+    // e cobre períodos > retenção viva do Seq (~6h).
+    const timeline = kongTimelineHourly(period);
     const topUsers = Object.entries(userAgg)
       .sort((a, b) => b[1].falhas - a[1].falhas).slice(0, 20)
       .map(([username, v]) => ({
