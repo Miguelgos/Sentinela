@@ -182,7 +182,7 @@ function bucketTimelineHourly(periodHours: number, dim: string): { hour: string;
 }
 
 export const getAuthErrorStats = createServerFn({ method: "GET" })
-  .validator((data: { period?: number } | undefined) => data ?? {})
+  .inputValidator((data: { period?: number } | undefined) => data ?? {})
   .handler(async ({ data }) => {
     const period = clampPeriod(data?.period);
     const fromDate = new Date(Date.now() - period * 3600 * 1000);
@@ -249,7 +249,7 @@ export const getAuthErrorStats = createServerFn({ method: "GET" })
   });
 
 export const getKongAuthStats = createServerFn({ method: "GET" })
-  .validator((data: { period?: number } | undefined) => data ?? {})
+  .inputValidator((data: { period?: number } | undefined) => data ?? {})
   .handler(async ({ data }) => {
     const period = clampPeriod(data?.period);
     const fromDate = new Date(Date.now() - period * 3600 * 1000);
