@@ -2,7 +2,7 @@ import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { LogIn, ShieldAlert, Globe, User, Wifi, RefreshCw } from "lucide-react";
+import { LogIn, ShieldAlert, Globe, User, Wifi, RefreshCw, Flame } from "lucide-react";
 import { useAnalysisData } from "@/hooks/useAnalysisData";
 import { AnalysisShell } from "@/components/AnalysisShell";
 import { StatCard } from "@/components/analysis/StatCard";
@@ -265,33 +265,72 @@ export function LoginAnalysis() {
                     <thead>
                       <tr className="border-b bg-muted/50">
                         <th className="text-left p-3 text-xs text-muted-foreground">IP</th>
+                        <th className="text-left p-3 text-xs text-muted-foreground">País</th>
                         <th className="text-right p-3 text-xs text-muted-foreground">Falhas</th>
                         <th className="text-right p-3 text-xs text-muted-foreground">Usuários</th>
+                        <th className="text-left p-3 text-xs text-muted-foreground">WAF</th>
                         <th className="text-right p-3 text-xs text-muted-foreground">Último</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {topIPs.map((ip, i) => (
-                        <tr key={i} className={`border-b hover:bg-muted/30 ${ip.usuarios_unicos >= 3 ? "bg-red-500/5" : ""}`}>
-                          <td className="p-3 text-xs font-mono">
-                            {ip.client_ip}
-                            {ip.usuarios_unicos >= 3 && (
-                              <ShieldAlert className="inline h-3 w-3 text-red-400 ml-1" />
-                            )}
-                            {ip.is_internal && (
-                              <Wifi className="inline h-3 w-3 text-blue-400 ml-1" />
-                            )}
-                          </td>
-                          <td className="p-3 text-xs text-right">
-                            <Badge variant="error">{ip.falhas}</Badge>
-                          </td>
-                          <td className="p-3 text-xs text-right text-muted-foreground">{ip.usuarios_unicos}</td>
-                          <td className="p-3 text-xs text-right text-muted-foreground whitespace-nowrap">
-                            {formatTimestamp(ip.last_seen)}
-                          </td>
-                        </tr>
-                      ))}
-                      {!topIPs.length && <EmptyRow cols={4} />}
+                      {topIPs.map((ip, i) => {
+                        const wafFlagged = ip.waf_total > 0;
+                        const rowClass = wafFlagged
+                          ? "bg-red-500/10 border-red-500/30"
+                          : ip.usuarios_unicos >= 3 ? "bg-red-500/5" : "";
+                        return (
+                          <tr key={i} className={`border-b hover:bg-muted/30 ${rowClass}`}>
+                            <td className="p-3 text-xs font-mono">
+                              {ip.client_ip}
+                              {ip.usuarios_unicos >= 3 && (
+                                <ShieldAlert className="inline h-3 w-3 text-red-400 ml-1" />
+                              )}
+                              {ip.is_internal && (
+                                <Wifi className="inline h-3 w-3 text-blue-400 ml-1" />
+                              )}
+                            </td>
+                            <td className="p-3 text-xs">
+                              {ip.waf_country ? (
+                                <span className="font-mono text-muted-foreground">{ip.waf_country}</span>
+                              ) : <span className="text-muted-foreground">—</span>}
+                            </td>
+                            <td className="p-3 text-xs text-right">
+                              <Badge variant="error">{ip.falhas}</Badge>
+                            </td>
+                            <td className="p-3 text-xs text-right text-muted-foreground">{ip.usuarios_unicos}</td>
+                            <td className="p-3 text-xs">
+                              {wafFlagged ? (
+                                <div className="flex flex-col gap-0.5">
+                                  <div className="flex items-center gap-1 flex-wrap">
+                                    <Flame className="h-3 w-3 text-red-400" />
+                                    <Badge className="bg-red-700 text-white text-[10px]">{ip.waf_blocked} bloqueios</Badge>
+                                  </div>
+                                  <div className="flex gap-1 flex-wrap">
+                                    {ip.waf_attacks.slice(0, 3).map((a) => (
+                                      <span key={a.cat} className="text-[10px] px-1.5 py-0.5 rounded bg-red-500/20 text-red-300">
+                                        {a.cat}×{a.count}
+                                      </span>
+                                    ))}
+                                  </div>
+                                  {ip.waf_tools.length > 0 && (
+                                    <div className="flex gap-1 flex-wrap text-[10px] text-amber-300">
+                                      {ip.waf_tools.filter(t => t !== "Browser/Other" && t !== "Unknown").slice(0, 2).map((t) => (
+                                        <span key={t} className="px-1.5 py-0.5 rounded bg-amber-500/20">{t}</span>
+                                      ))}
+                                    </div>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-muted-foreground text-xs">—</span>
+                              )}
+                            </td>
+                            <td className="p-3 text-xs text-right text-muted-foreground whitespace-nowrap">
+                              {formatTimestamp(ip.last_seen)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      {!topIPs.length && <EmptyRow cols={6} />}
                     </tbody>
                   </table>
                 </div>

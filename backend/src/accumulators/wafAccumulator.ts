@@ -12,7 +12,7 @@
 import { gcFetch } from "../lib/gcClient";
 import { BucketStore } from "../timeseries/bucketStore";
 import { EventStore } from "../timeseries/eventStore";
-import { REFERENCE_WINDOW_DAYS, EVENT_STORE_WINDOW_MIN } from "../timeseries/types";
+import { REFERENCE_WINDOW_DAYS, EVENT_STORE_WINDOW_MIN, REFERENCE_WINDOW_MIN } from "../timeseries/types";
 
 interface GcAlert { id: string; msg: string; match?: string }
 export interface GcEvent {
@@ -32,6 +32,31 @@ const _eventStore = new EventStore<GcEvent>();
 const WAF_SOURCE = "waf";
 
 export const WAF = WAF_SOURCE;
+
+// Rollup por IP (10d). Permite correlação eficiente IP → contexto WAF
+// sem varrer todos eventos. eventStore tem janela curta (2h); bucketStore
+// agrega por (dim, minute) — nenhum dos dois responde "qual o resumo
+// pra este IP nos últimos 10d".
+export interface WafIpContext {
+  ip: string;
+  country: string | null;
+  attacks: Record<string, number>; // SQLi → 5, XSS → 1, ...
+  tools: string[];
+  blocked: number;
+  total: number;
+  firstSeen: string; // ISO
+  lastSeen: string;  // ISO
+}
+interface IpRollupSlot {
+  country: string | null;
+  attacks: Map<string, number>;
+  tools: Set<string>;
+  blocked: number;
+  total: number;
+  firstSeenMin: number;
+  lastSeenMin: number;
+}
+const _ipRollup = new Map<string, IpRollupSlot>();
 
 let _syncPhase: "idle" | "syncing" | "done" | "error" = "idle";
 let _syncError: string | null = null;
@@ -99,6 +124,41 @@ export function dimensionsForGcEvent(e: GcEvent): Record<string, number> {
   return out;
 }
 
+function bumpIpRollup(e: GcEvent, minute: number): void {
+  if (!e.ip) return;
+  let slot = _ipRollup.get(e.ip);
+  if (!slot) {
+    slot = {
+      country: null, attacks: new Map(), tools: new Set(),
+      blocked: 0, total: 0, firstSeenMin: minute, lastSeenMin: minute,
+    };
+    _ipRollup.set(e.ip, slot);
+  }
+  if (!slot.country && e.country_code) slot.country = e.country_code;
+
+  // Mesma lógica de classifyAlert acima — usa primeira categoria ≠ Other.
+  let attackKey: string | null = null;
+  for (const a of e.alerts ?? []) {
+    const cat = classifyAlert(a.msg, a.id);
+    if (cat !== "Other") { attackKey = cat; break; }
+  }
+  if (!attackKey) attackKey = "Other";
+  slot.attacks.set(attackKey, (slot.attacks.get(attackKey) ?? 0) + 1);
+
+  slot.tools.add(detectTool(e.user_agent ?? ""));
+  if (e.action === "block") slot.blocked++;
+  slot.total++;
+  if (minute > slot.lastSeenMin)  slot.lastSeenMin  = minute;
+  if (minute < slot.firstSeenMin) slot.firstSeenMin = minute;
+}
+
+function pruneIpRollup(nowMin: number): void {
+  const cutoff = nowMin - REFERENCE_WINDOW_MIN;
+  for (const [ip, slot] of _ipRollup) {
+    if (slot.lastSeenMin < cutoff) _ipRollup.delete(ip);
+  }
+}
+
 function ingest(events: GcEvent[], nowMin: number): void {
   if (events.length === 0) return;
   const byMinute = new Map<number, Record<string, number>>();
@@ -120,6 +180,8 @@ function ingest(events: GcEvent[], nowMin: number): void {
     if (minute >= nowMin - EVENT_STORE_WINDOW_MIN) {
       eventBatch.push({ eventId: eventId(e, tsMs), event: e, timestamp: minute });
     }
+
+    bumpIpRollup(e, minute);
   }
 
   for (const [minute, dims] of byMinute) {
@@ -177,7 +239,8 @@ async function refresh(): Promise<void> {
   ingest(events, nowMin);
   _bucketStore.rotateTo(WAF_SOURCE, nowMin);
   _eventStore.pruneToWindow(WAF_SOURCE, nowMin);
-  console.log(`[wafAccumulator] +${events.length} eventos (eventStore: ${_eventStore.size(WAF_SOURCE)})`);
+  pruneIpRollup(nowMin);
+  console.log(`[wafAccumulator] +${events.length} eventos (eventStore: ${_eventStore.size(WAF_SOURCE)}, ipRollup: ${_ipRollup.size})`);
 }
 
 async function syncFullHistory(): Promise<void> {
@@ -204,10 +267,11 @@ async function syncFullHistory(): Promise<void> {
 
   _bucketStore.rotateTo(WAF_SOURCE, nowMin);
   _eventStore.pruneToWindow(WAF_SOURCE, nowMin);
+  pruneIpRollup(nowMin);
   _syncPhase = "done";
   _syncFinishedAt = new Date().toISOString();
   const stats = _bucketStore.getStats(WAF_SOURCE);
-  console.log(`[wafAccumulator] sync completo: ${_eventsLoaded} eventos | ${stats.dimensions} dims`);
+  console.log(`[wafAccumulator] sync completo: ${_eventsLoaded} eventos | ${stats.dimensions} dims | ipRollup: ${_ipRollup.size}`);
 }
 
 export async function initWafAccumulator(): Promise<void> {
@@ -227,6 +291,30 @@ export async function initWafAccumulator(): Promise<void> {
 export function getWafBucketStore(): BucketStore { return _bucketStore; }
 export function getWafEventStore(): EventStore<GcEvent> { return _eventStore; }
 export function isWafReady(): boolean { return _syncPhase === "done"; }
+
+export function getWafIpContext(ip: string): WafIpContext | null {
+  const slot = _ipRollup.get(ip);
+  if (!slot) return null;
+  return {
+    ip,
+    country: slot.country,
+    attacks: Object.fromEntries(slot.attacks),
+    tools: [...slot.tools],
+    blocked: slot.blocked,
+    total: slot.total,
+    firstSeen: new Date(slot.firstSeenMin * 60_000).toISOString(),
+    lastSeen:  new Date(slot.lastSeenMin  * 60_000).toISOString(),
+  };
+}
+
+export function getWafIpContextMany(ips: string[]): Record<string, WafIpContext> {
+  const out: Record<string, WafIpContext> = {};
+  for (const ip of ips) {
+    const ctx = getWafIpContext(ip);
+    if (ctx) out[ip] = ctx;
+  }
+  return out;
+}
 export function getWafSyncProgress() {
   return {
     phase: _syncPhase, error: _syncError,

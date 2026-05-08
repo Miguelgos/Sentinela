@@ -123,6 +123,11 @@ export interface LoginOverview {
     usuarios_unicos: number;
     last_seen: string;
     is_internal: boolean;
+    waf_country: string | null;
+    waf_attacks: { cat: string; count: number }[];
+    waf_tools: string[];
+    waf_blocked: number;
+    waf_total: number;
   }[];
   failureReasons: { reason: LoginFailReason; count: number }[];
   recentFailures: {

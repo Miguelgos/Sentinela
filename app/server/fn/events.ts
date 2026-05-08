@@ -15,6 +15,7 @@ import {
   getLoginBucketStore, LOGIN, classifyLoginEvent,
   type LoginSource, type LoginFailReason,
 } from "../../../backend/src/accumulators/loginAccumulator";
+import { getWafIpContextMany } from "../../../backend/src/accumulators/wafAccumulator";
 import type { BucketStore } from "../../../backend/src/timeseries/bucketStore";
 import type { EventFilters } from "../../../frontend/src/lib/api";
 
@@ -502,14 +503,25 @@ export const getLoginOverview = createServerFn({ method: "GET" })
         sources: [...v.sources].filter(Boolean) as LoginSource[],
         last_seen: v.last,
       }));
-    const topIPs = Object.entries(ipAgg)
+    const ipsRanked = Object.entries(ipAgg)
       .sort((a, b) => b[1].falhas - a[1].falhas)
-      .slice(0, 15)
-      .map(([client_ip, v]) => ({
-        client_ip, falhas: v.falhas, usuarios_unicos: v.users.size,
+      .slice(0, 15);
+    const wafCtxByIp = getWafIpContextMany(ipsRanked.map(([ip]) => ip));
+    const topIPs = ipsRanked.map(([client_ip, v]) => {
+      const waf = wafCtxByIp[client_ip] ?? null;
+      return {
+        client_ip,
+        falhas: v.falhas,
+        usuarios_unicos: v.users.size,
         last_seen: v.last,
         is_internal: /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(client_ip),
-      }));
+        waf_country: waf?.country ?? null,
+        waf_attacks: waf ? Object.entries(waf.attacks).map(([cat, count]) => ({ cat, count })) : [],
+        waf_tools: waf?.tools ?? [],
+        waf_blocked: waf?.blocked ?? 0,
+        waf_total: waf?.total ?? 0,
+      };
+    });
 
     return {
       summary: {
