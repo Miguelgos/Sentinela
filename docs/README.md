@@ -2,12 +2,13 @@
 
 ## Architecture
 - [Overview](architecture/overview.md) — stack, fluxo de dados, componentes
-- [Accumulator](architecture/accumulator.md) — store em memória + sync do Seq
-- [Data Model](architecture/data-model.md) — formato dos eventos no store
+- [Accumulators](architecture/accumulator.md) — stores em memória (Seq, Kong, Login, WAF, Audit, Infra)
+- [Data Model](architecture/data-model.md) — `BucketStore`, `EventStore`, `_ipRollup`
 - [Integrations](architecture/integrations.md) — endpoints externos consumidos
 
 ## Specs (features de produto)
 - [Dashboard](specs/dashboard.md)
+- [Logins](specs/login.md) — visão consolidada (Kong + IS4 + Auth Common + WAF correlation)
 - [Threat Report](specs/threat-report.md)
 - [Audit (Loki)](specs/audit.md)
 - [Kubernetes (Grafana)](specs/kubernetes.md)
@@ -16,4 +17,4 @@
 - [Kubernetes](deploy/kubernetes.md) — pipeline ADO, Kong, manifest, Keel
 
 ## Decisões arquiteturais
-- [ADR index](adr/) — 13 ADRs históricos (decisões e contexto)
+- [ADR index](adr/) — ADRs históricos (decisões e contexto)

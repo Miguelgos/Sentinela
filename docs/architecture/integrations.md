@@ -7,8 +7,11 @@ estão em `docs/specs/` nas páginas e integrações correspondentes.
 
 - TLS com certificado autoassinado — `rejectUnauthorized: false` (apenas para Seq)
 - Sem autenticação — endpoint público
-- Filtro: `signal-m33301` (apenas erros do salesbo)
-- Polling via `accumulator.ts`; ver `docs/architecture/seq-polling.md`
+- Filtro padrão: `signal-m33301~signal-m33302` (erros do salesbo + integra) — usado pelo `seqAccumulator`
+- Filtros sem signal:
+  - `kongAccumulator`: `@Message = 'Kong Auth Request'`
+  - `loginAccumulator`: `(@Message = 'Kong Auth Request') or (Contains(@SourceContext, 'IdentityServer4.Events')) or (Contains(@Message, 'Erro autenticação'))`
+- Polling via `backend/src/accumulators/{seq,kong,login}Accumulator.ts`; detalhes em [`accumulator.md`](accumulator.md)
 
 ## Datadog (`api.us5.datadoghq.com`)
 
@@ -19,7 +22,10 @@ estão em `docs/specs/` nas páginas e integrações correspondentes.
 ## GoCache (`api.gocache.com.br`)
 
 - Auth: header `GoCache-Token: <token>`
-- Consultas às últimas 24h com paginação (até 500 eventos WAF, 300 bot)
+- Endpoint: `POST /v1/threat-hub/events`
+- **Limit per call: 100** — exceder retorna HTTP 400 com `"Limit não pode ser maior que 100."` (silent failure no `httpClient` se ignorado). Ver [ADR-016](../adr/ADR-016-waf-ip-rollup.md)
+- Pra cobrir dias com volume alto, `wafAccumulator` paginação por **subdivisão temporal recursiva** (depth ≤ 8) quando uma chamada satura 100 eventos
+- `wafAccumulator` mantém `_ipRollup` (Map<IP, contexto>) por 10 dias pra correlação O(1) com Login dashboard
 - Rota backend: `GET /api/gocache/overview`
 
 ## Grafana (`http://grafana-prd.ituran.sp`)

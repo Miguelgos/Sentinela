@@ -11,7 +11,7 @@ URL prd: <https://crm.ituran.sp/sentinela>
 - **Adapter Node** próprio: `@hono/node-server` + `serveStatic` em `node-server.mjs`
 - **Auth**: Supabase (email/senha + Microsoft OAuth)
 - **LLM**: Azure OpenAI Foundry interno
-- **Store**: `Map` em memória, 7d, cap 100k eventos (compactos)
+- **Stores**: `BucketStore` (séries 10d) + `EventStore` (raw 2h) por accumulator (Seq, Kong, Login, WAF, Audit, Infra)
 - **Build**: pnpm com `node-linker=hoisted`
 
 ## Rodar local
