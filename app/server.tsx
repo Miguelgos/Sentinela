@@ -14,11 +14,13 @@ const { initWafAccumulator } = await import("../backend/src/accumulators/wafAccu
 const { initAuditAccumulator } = await import("../backend/src/accumulators/auditAccumulator");
 const { initInfraAccumulator } = await import("../backend/src/accumulators/infraAccumulator");
 const { initKongAccumulator } = await import("../backend/src/accumulators/kongAccumulator");
+const { initLoginAccumulator } = await import("../backend/src/accumulators/loginAccumulator");
 await initAccumulator().catch(console.error);
 await initWafAccumulator().catch(console.error);
 await initAuditAccumulator().catch(console.error);
 await initInfraAccumulator().catch(console.error);
 await initKongAccumulator().catch(console.error);
+await initLoginAccumulator().catch(console.error);
 
 const fetch = createStartHandler(defaultStreamHandler);
 export default { fetch };

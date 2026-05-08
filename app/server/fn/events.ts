@@ -11,6 +11,10 @@ import {
   SEQ,
 } from "../../../backend/src/accumulators/seqAccumulator";
 import { getKongBucketStore, KONG } from "../../../backend/src/accumulators/kongAccumulator";
+import {
+  getLoginBucketStore, LOGIN, classifyLoginEvent,
+  type LoginSource, type LoginFailReason,
+} from "../../../backend/src/accumulators/loginAccumulator";
 import type { BucketStore } from "../../../backend/src/timeseries/bucketStore";
 import type { EventFilters } from "../../../frontend/src/lib/api";
 
@@ -383,6 +387,143 @@ export const getKongAuthStats = createServerFn({ method: "GET" })
       period,
       timeline, topUsers, topIPs, credentialStuffing: stuffing,
       anomalousUsernames, serverErrors, recentFailures,
+    };
+    });
+  });
+
+// ── Login Overview (multi-source: Kong + IS4 + Authentication Common) ───────
+
+const LOGIN_FILTER_FN =
+  "(@Message = 'Kong Auth Request') " +
+  "or (Contains(@SourceContext, 'IdentityServer4.Events')) " +
+  "or (Contains(@Message, 'Erro autenticação'))";
+
+function bucketSumOver(store: BucketStore, source: string, dim: string, periodHours: number): number {
+  const nowMin = Math.floor(Date.now() / 60_000);
+  const startMin = nowMin - periodHours * 60;
+  const series = store.getSeries(source, dim, nowMin);
+  let sum = 0;
+  for (const [m, c] of series.buckets) if (m >= startMin) sum += c;
+  return sum;
+}
+
+export const getLoginOverview = createServerFn({ method: "GET" })
+  .inputValidator((data: { period?: number } | undefined) => data ?? {})
+  .handler(async ({ data }) => {
+    const period = clampPeriod(data?.period);
+    const fromDate = new Date(Date.now() - period * 3600 * 1000);
+
+    return memoizeSeq(`getLoginOverview:${period}`, async () => {
+    const store = getLoginBucketStore();
+
+    // Summary do bucket (cobre 10d sem cap de fetchSeq)
+    const total       = bucketSumOver(store, LOGIN, "login_total", period);
+    const ok          = bucketSumOver(store, LOGIN, "login_ok", period);
+    const fail        = bucketSumOver(store, LOGIN, "login_fail", period);
+    const internal    = bucketSumOver(store, LOGIN, "login_class:internal", period);
+    const external    = bucketSumOver(store, LOGIN, "login_class:external", period);
+    const sourceTotals = {
+      kong:        bucketSumOver(store, LOGIN, "login_source:kong", period),
+      is_web:      bucketSumOver(store, LOGIN, "login_source:is_web", period),
+      is_api:      bucketSumOver(store, LOGIN, "login_source:is_api", period),
+      auth_common: bucketSumOver(store, LOGIN, "login_source:auth_common", period),
+    };
+    const failureReasons = (
+      ["invalid_credentials", "invalid_grant", "unauthorized", "server_error", "other"] as LoginFailReason[]
+    ).map((r) => ({ reason: r, count: bucketSumOver(store, LOGIN, `login_fail_reason:${r}`, period) }))
+     .filter((r) => r.count > 0)
+     .sort((a, b) => b.count - a.count);
+
+    // Timeline empilhada por source/outcome (10d via bucketStore)
+    const okHourly  = bucketTimelineHourlyFromStore(store, LOGIN, period, "login_ok");
+    const failHourly = bucketTimelineHourlyFromStore(store, LOGIN, period, "login_fail");
+    const kongHourly = bucketTimelineHourlyFromStore(store, LOGIN, period, "login_source:kong");
+    const isWebHourly = bucketTimelineHourlyFromStore(store, LOGIN, period, "login_source:is_web");
+    const isApiHourly = bucketTimelineHourlyFromStore(store, LOGIN, period, "login_source:is_api");
+    const authCommonHourly = bucketTimelineHourlyFromStore(store, LOGIN, period, "login_source:auth_common");
+    const indexBy = (arr: { hour: string; count: number }[]) => new Map(arr.map(p => [p.hour, p.count]));
+    const failIdx = indexBy(failHourly);
+    const kongIdx = indexBy(kongHourly);
+    const isWebIdx = indexBy(isWebHourly);
+    const isApiIdx = indexBy(isApiHourly);
+    const authCommonIdx = indexBy(authCommonHourly);
+    const timeline = okHourly.map(p => ({
+      hora: p.hour,
+      ok:          p.count,
+      fail:        failIdx.get(p.hour) ?? 0,
+      kong:        kongIdx.get(p.hour) ?? 0,
+      is_web:      isWebIdx.get(p.hour) ?? 0,
+      is_api:      isApiIdx.get(p.hour) ?? 0,
+      auth_common: authCommonIdx.get(p.hour) ?? 0,
+    }));
+
+    // Drill-downs vivos (cap em retenção do Seq + 10k events)
+    const liveEvents = await fetchSeq({ filter: LOGIN_FILTER_FN, fromDate, maxTotal: 10_000 });
+    const userAgg: Record<string, { falhas: number; sucessos: number; sources: Set<LoginSource>; last: string }> = {};
+    const ipAgg: Record<string, { falhas: number; users: Set<string>; last: string }> = {};
+    const recentFailures: {
+      id: number; timestamp: string; source: LoginSource; username: string | null;
+      client_ip: string | null; client_id: string | null; reason: LoginFailReason | null;
+    }[] = [];
+
+    for (const e of liveEvents) {
+      const c = classifyLoginEvent(e);
+      if (!c.source || !c.outcome) continue;
+
+      if (c.username) {
+        if (!userAgg[c.username]) userAgg[c.username] = { falhas: 0, sucessos: 0, sources: new Set(), last: e.timestamp };
+        if (c.outcome === "fail") userAgg[c.username].falhas++;
+        else userAgg[c.username].sucessos++;
+        userAgg[c.username].sources.add(c.source);
+        if (e.timestamp > userAgg[c.username].last) userAgg[c.username].last = e.timestamp;
+      }
+
+      if (c.source === "kong" && c.client_ip) {
+        if (!ipAgg[c.client_ip]) ipAgg[c.client_ip] = { falhas: 0, users: new Set(), last: e.timestamp };
+        if (c.outcome === "fail") ipAgg[c.client_ip].falhas++;
+        if (c.username) ipAgg[c.client_ip].users.add(c.username);
+        if (e.timestamp > ipAgg[c.client_ip].last) ipAgg[c.client_ip].last = e.timestamp;
+      }
+
+      if (c.outcome === "fail" && recentFailures.length < 50) {
+        recentFailures.push({
+          id: recentFailures.length, timestamp: e.timestamp,
+          source: c.source, username: c.username, client_ip: c.client_ip,
+          client_id: c.client_id, reason: c.reason,
+        });
+      }
+    }
+
+    const topUsers = Object.entries(userAgg)
+      .sort((a, b) => b[1].falhas - a[1].falhas)
+      .slice(0, 20)
+      .map(([username, v]) => ({
+        username, falhas: v.falhas, sucessos: v.sucessos,
+        sources: [...v.sources].filter(Boolean) as LoginSource[],
+        last_seen: v.last,
+      }));
+    const topIPs = Object.entries(ipAgg)
+      .sort((a, b) => b[1].falhas - a[1].falhas)
+      .slice(0, 15)
+      .map(([client_ip, v]) => ({
+        client_ip, falhas: v.falhas, usuarios_unicos: v.users.size,
+        last_seen: v.last,
+        is_internal: /^(10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(client_ip),
+      }));
+
+    return {
+      summary: {
+        total, ok, fail,
+        failurePct: total > 0 ? parseFloat((fail / total * 100).toFixed(1)) : 0,
+        internal, external,
+        sources: sourceTotals,
+      },
+      period,
+      timeline,
+      topUsers,
+      topIPs,
+      failureReasons,
+      recentFailures,
     };
     });
   });

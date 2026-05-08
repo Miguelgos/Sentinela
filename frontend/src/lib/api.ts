@@ -6,6 +6,7 @@ import {
   getTimeline,
   getAuthErrorStats,
   getKongAuthStats,
+  getLoginOverview,
 } from "../../../app/server/fn/events";
 import { lookupPessoa } from "../../../app/server/fn/pessoa";
 import {
@@ -83,6 +84,56 @@ export interface KongAuthStats {
   anomalousUsernames: { username: string; client_ip: string; tentativas: string }[];
   serverErrors: { timestamp: string; username: string | null; client_ip: string | null; path: string | null }[];
   recentFailures: { id: number; timestamp: string; username: string | null; client_ip: string | null; path: string | null; status_code: number; module: string | null }[];
+}
+
+export type LoginSource = "kong" | "is_web" | "is_api" | "auth_common";
+export type LoginFailReason =
+  | "invalid_credentials"
+  | "invalid_grant"
+  | "unauthorized"
+  | "server_error"
+  | "other";
+
+export interface LoginOverview {
+  summary: {
+    total: number;
+    ok: number;
+    fail: number;
+    failurePct: number;
+    internal: number;
+    external: number;
+    sources: { kong: number; is_web: number; is_api: number; auth_common: number };
+  };
+  period?: number;
+  timeline: {
+    hora: string;
+    ok: number; fail: number;
+    kong: number; is_web: number; is_api: number; auth_common: number;
+  }[];
+  topUsers: {
+    username: string;
+    falhas: number;
+    sucessos: number;
+    sources: LoginSource[];
+    last_seen: string;
+  }[];
+  topIPs: {
+    client_ip: string;
+    falhas: number;
+    usuarios_unicos: number;
+    last_seen: string;
+    is_internal: boolean;
+  }[];
+  failureReasons: { reason: LoginFailReason; count: number }[];
+  recentFailures: {
+    id: number;
+    timestamp: string;
+    source: LoginSource;
+    username: string | null;
+    client_ip: string | null;
+    client_id: string | null;
+    reason: LoginFailReason | null;
+  }[];
 }
 
 export interface AuthErrorStats {
@@ -331,6 +382,7 @@ export const eventsApi = {
   timeline:           (hours?: number)              => getTimeline({ data: { hours } }),
   authErrorStats:     (period: AuthPeriodHours = 24) => getAuthErrorStats({ data: { period } }),
   kongAuthStats:      (period: AuthPeriodHours = 24) => getKongAuthStats({ data: { period } }),
+  loginOverview:      (period: AuthPeriodHours = 24) => getLoginOverview({ data: { period } }),
   datadogOverview:    ()                            => getDatadogOverview(),
   gocacheOverview:    ()                            => getGocacheOverview(),
   datadogMetrics:     ()                            => getDatadogMetrics(),
@@ -365,4 +417,5 @@ export const queryKeys = {
   statsTimeline:   ["statsTimeline"],
   kongAuth:        ["kongAuthStats"],
   authErrors:      ["authErrorStats"],
+  loginOverview:   ["loginOverview"],
 } as const;

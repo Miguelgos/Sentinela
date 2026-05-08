@@ -1,11 +1,12 @@
 import { useState } from "react";
-import { LayoutDashboard, List, ShieldAlert, Globe, BarChart2, Flame, FileWarning, Activity, Layers, Eye, LogOut } from "lucide-react";
+import { LayoutDashboard, List, ShieldAlert, Globe, BarChart2, Flame, FileWarning, Activity, Layers, Eye, LogOut, LogIn } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Separator } from "@/components/ui/separator";
 import { Dashboard } from "@/components/Dashboard";
 import { LogsTable } from "@/components/LogsTable";
 import { AuthErrorAnalysis } from "@/components/AuthErrorAnalysis";
 import { KongAuthAnalysis } from "@/components/KongAuthAnalysis";
+import { LoginAnalysis } from "@/components/LoginAnalysis";
 import { DatadogAnalysis } from "@/components/DatadogAnalysis";
 import { GoCacheAnalysis } from "@/components/GoCacheAnalysis";
 import { ReportAnalysis } from "@/components/ReportAnalysis";
@@ -16,11 +17,12 @@ import { SentinelaLogo } from "@/components/SentinelaLogo";
 import { LoginPage } from "@/components/LoginPage";
 import { useAuth } from "@/hooks/useAuth";
 
-type Page = "dashboard" | "logs" | "auth-errors" | "kong-auth" | "datadog" | "gocache" | "report" | "anomaly" | "kubernetes" | "audit";
+type Page = "dashboard" | "logs" | "logins" | "auth-errors" | "kong-auth" | "datadog" | "gocache" | "report" | "anomaly" | "kubernetes" | "audit";
 
 const NAV = [
   { id: "dashboard"   as Page, label: "Dashboard",              icon: LayoutDashboard },
   { id: "logs"        as Page, label: "Eventos",                icon: List },
+  { id: "logins"      as Page, label: "Logins",                 icon: LogIn },
   { id: "auth-errors" as Page, label: "Falhas de Autenticação", icon: ShieldAlert },
   { id: "kong-auth"   as Page, label: "Kong Auth",              icon: Globe },
   { id: "datadog"     as Page, label: "Datadog",                icon: BarChart2 },
@@ -38,6 +40,7 @@ export default function App() {
   const PageTitle: Record<Page, string> = {
     dashboard:    "Dashboard",
     logs:         "Eventos",
+    logins:       "Logins — Visão Consolidada",
     "auth-errors":"Análise — Falhas de Autenticação",
     "kong-auth":  "Análise — Kong Auth Request",
     datadog:      "Datadog — Infraestrutura & Monitores",
@@ -106,6 +109,7 @@ export default function App() {
         <div className="p-6">
           {page === "dashboard"   && <Dashboard />}
           {page === "logs"        && <LogsTable />}
+          {page === "logins"      && <LoginAnalysis />}
           {page === "auth-errors" && <AuthErrorAnalysis />}
           {page === "kong-auth"   && <KongAuthAnalysis />}
           {page === "datadog"     && <DatadogAnalysis />}
